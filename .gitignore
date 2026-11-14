@@ -1,0 +1,53 @@
+# Compiled binaries & build output
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# Node & Frontend
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment & Local Secrets
+.env
+.env.local
+.env.*.local
+*.env
+*.pem
+*.key
+
+# IDE & Editor Configs
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and Cloned Repositories
+repomind-repos/
+temp/
+tmp/
+*.log
