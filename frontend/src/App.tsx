@@ -43,6 +43,8 @@ mermaid.initialize({
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 });
 
+const API_BASE = (((import.meta as any).env?.VITE_API_BASE_URL as string) || '').replace(/\/+$/, '');
+
 /**
  * Strips all HTML tags and unescapes entities safely.
  */
@@ -495,7 +497,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    fetch('/api/v1/repositories/health')
+    fetch(`${API_BASE}/api/v1/repositories/health`)
       .then(r => r.json())
       .then(d => {
         if (d && d.geminiConfigured) setGeminiActive(true);
@@ -510,7 +512,7 @@ export default function App() {
   const handleSaveApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/v1/repositories/config/api-key', {
+      const res = await fetch(`${API_BASE}/api/v1/repositories/config/api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: apiKeyInput.trim() })
@@ -530,7 +532,7 @@ export default function App() {
     setError(null);
 
     try {
-      const res = await fetch('/api/v1/repositories/analyze', {
+      const res = await fetch(`${API_BASE}/api/v1/repositories/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repositoryUrl: repoUrl.trim(), branch: branch.trim() || undefined })
@@ -567,7 +569,7 @@ export default function App() {
     setChatLoading(true);
 
     try {
-      const res = await fetch(`/api/v1/repositories/${analysis.repositoryId}/chat`, {
+      const res = await fetch(`${API_BASE}/api/v1/repositories/${analysis.repositoryId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: questionText })
