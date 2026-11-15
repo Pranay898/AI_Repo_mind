@@ -352,7 +352,7 @@ public class RepositoryUnderstandingService {
             sb.append("#### Architectural Breakdown\n");
             sb.append(repo.getArchitecture().getExplanation()).append("\n\n");
             for (ArchitectureLayer layer : repo.getArchitecture().getLayers()) {
-                sb.append("- **").append(layer.getName()).append("**: ").append(layer.getDescription()).append("\n");
+                sb.append("- **").append(layer.getName()).append("**: ").append(layer.getResponsibility()).append("\n");
             }
             return sb.toString();
         }

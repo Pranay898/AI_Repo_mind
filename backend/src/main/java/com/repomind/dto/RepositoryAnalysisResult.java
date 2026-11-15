@@ -72,6 +72,10 @@ public class RepositoryAnalysisResult {
         private String applicationType;
         private String architectureSummary;
         private List<String> mainModules;
+
+        public String getPrimaryLanguage() {
+            return applicationType;
+        }
     }
 
     @Data
@@ -117,6 +121,10 @@ public class RepositoryAnalysisResult {
         private String name;
         private String responsibility;
         private List<String> relatedFiles;
+
+        public String getDescription() {
+            return responsibility;
+        }
     }
 
     @Data
@@ -187,6 +195,10 @@ public class RepositoryAnalysisResult {
         private String version;
         private String ecosystem; // NPM, Maven, PyPI, Go, Cargo, etc.
         private String purpose;
+
+        public String getType() {
+            return ecosystem != null ? ecosystem : "Package";
+        }
     }
 
     @Data
@@ -201,6 +213,24 @@ public class RepositoryAnalysisResult {
         private List<String> keyConcepts;
         private String practicalExercise;
         private List<String> verificationQuestions;
+
+        public String getGoal() {
+            return focusArea != null ? focusArea : (practicalExercise != null ? practicalExercise : title);
+        }
+
+        public List<String> getTasks() {
+            List<String> list = new ArrayList<>();
+            if (filesToRead != null && !filesToRead.isEmpty()) {
+                list.add("Study files: " + String.join(", ", filesToRead));
+            }
+            if (keyConcepts != null && !keyConcepts.isEmpty()) {
+                list.add("Master concepts: " + String.join(", ", keyConcepts));
+            }
+            if (practicalExercise != null && !practicalExercise.isBlank()) {
+                list.add("Exercise: " + practicalExercise);
+            }
+            return list.isEmpty() ? List.of("Review codebase modules") : list;
+        }
     }
 }
 
