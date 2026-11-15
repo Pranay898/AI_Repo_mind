@@ -95,9 +95,18 @@ public class RepositoryAnalysisResult {
     @AllArgsConstructor
     public static class ArchitectureData {
         private String mermaidDiagram;
+        private String mermaidChart;
         private String explanation;
         @Builder.Default
         private List<ArchitectureLayer> layers = new ArrayList<>();
+
+        public String getMermaidChart() {
+            return (mermaidChart != null && !mermaidChart.isBlank()) ? mermaidChart : mermaidDiagram;
+        }
+
+        public String getMermaidDiagram() {
+            return (mermaidDiagram != null && !mermaidDiagram.isBlank()) ? mermaidDiagram : mermaidChart;
+        }
     }
 
     @Data
@@ -118,7 +127,16 @@ public class RepositoryAnalysisResult {
         private String title;
         private String description;
         private String mermaidCode;
+        private String mermaidChart;
         private List<String> steps;
+
+        public String getMermaidChart() {
+            return (mermaidChart != null && !mermaidChart.isBlank()) ? mermaidChart : mermaidCode;
+        }
+
+        public String getMermaidCode() {
+            return (mermaidCode != null && !mermaidCode.isBlank()) ? mermaidCode : mermaidChart;
+        }
     }
 
     @Data

@@ -96,8 +96,8 @@ public class RepositoryUnderstandingService {
         // Build Dynamic GitDiagram-style Architecture Data with real file-to-file import edges
         ArchitectureData architecture = buildArchitecture(fullName, primaryLanguage, frameworks, components, apis, dbInfo);
 
-        // Build Dynamic Repository-Specific Workflows
-        List<WorkflowDiagram> workflows = buildWorkflows(fullName, primaryLanguage, frameworks, apis, components, dbInfo);
+        // Workflows removed as requested by user
+        List<WorkflowDiagram> workflows = Collections.emptyList();
 
         // Build Project Overview (enriched by Gemini AI + deep code inspection)
         ProjectOverview overview = buildOverview(fullName, primaryLanguage, langCounts, frameworks, components, apis, dbInfo, rootPath, fileContentsMap);
@@ -109,8 +109,8 @@ public class RepositoryUnderstandingService {
                 "Cloned repository '" + fullName + "' (" + counts[0] + " files, " + counts[1] + " directories).",
                 "Identified primary language: " + primaryLanguage + ", " + dependencies.size() + " dependencies, and frameworks: " + (frameworks.isEmpty() ? "Standard Library" : frameworks) + ".",
                 "Extracted " + components.size() + " source modules and " + apis.size() + " functions/routes with import relationships.",
-                "Built system architecture diagram and " + workflows.size() + " execution workflow models.",
-                "Indexed " + fileContentsMap.size() + " files in memory for contextual question answering."
+                "Built system architecture diagram and mapped components into visual topology.",
+                "Indexed " + fileContentsMap.size() + " files in memory for contextual Gitly AI question answering."
         );
 
         RepositoryAnalysisResult result = RepositoryAnalysisResult.builder()
@@ -203,7 +203,7 @@ public class RepositoryUnderstandingService {
         agentThoughts.add("Scanned " + repo.getComponents().size() + " components and " + repo.getApis().size() + " endpoints in " + repo.getRepositoryName());
         agentThoughts.add("Gathered source code excerpts from: " + matchedFiles);
 
-        String systemPrompt = "You are RepoMind AI, an expert Senior Software Engineer, Principal Architect, and Codebase Intelligence Assistant (operating just like ChatGPT).\n"
+        String systemPrompt = "You are Gitly AI, an expert Senior Software Engineer, Principal Architect, and Codebase Intelligence Assistant (operating just like ChatGPT).\n"
                 + "You are helping a software engineer deeply understand this GitHub repository: " + repo.getRepositoryName() + ".\n\n"
                 + "CODEBASE PROFILE:\n"
                 + "- Primary Languages: " + repo.getLanguageDistribution() + "\n"
@@ -221,8 +221,9 @@ public class RepositoryUnderstandingService {
                 + "2. Reference actual file names, function names, classes, and logic from this repository.\n"
                 + "3. When describing how something works, break down the step-by-step execution flow with clear explanations.\n"
                 + "4. Use GitHub-Flavored Markdown: clean code blocks with syntax highlighting, bullet points, and bold text.\n"
-                + "5. If the question asks about a feature or file not in this repository, explain what exists instead in this repository.\n"
-                + "6. Do not include raw HTML or weird punctuation formatting.";
+                + "5. DIAGRAM GENERATION: Whenever the user asks for a diagram, flow, architecture, sequence, or visualization, provide a valid Mermaid diagram inside a ```mermaid\n...\n``` code block using standard flowchart TB/LR, sequenceDiagram, or erDiagram syntax so the user's interface can render it interactively.\n"
+                + "6. If the question asks about a feature or file not in this repository, explain what exists instead in this repository.\n"
+                + "7. Do not include raw HTML or weird punctuation formatting.";
 
         List<Map<String, String>> historyList = new ArrayList<>();
         if (request.getHistory() != null) {
@@ -240,7 +241,7 @@ public class RepositoryUnderstandingService {
             engineModel = "Google Gemini AI (Live)";
             agentThoughts.add("Generated live conversational response via Google Gemini AI model.");
         } else {
-            engineModel = "RepoMind Intelligent Reasoning Engine";
+            engineModel = "Gitly AI Reasoning Engine";
             agentThoughts.add("Synthesized code-backed answer from repository source files and AST models.");
             aiAnswer = buildDynamicAgentAnswer(repo, rootPath, fileContents, qClean, qLower, queryTokens, rankedComponents, matchedFiles);
         }
@@ -341,7 +342,125 @@ public class RepositoryUnderstandingService {
 
         StringBuilder sb = new StringBuilder();
 
-        // 1. Direct match on a specific file or class name
+        // 1. Diagram Generation Request (Synthesizes live Mermaid diagrams)
+        if (qLower.contains("diagram") || qLower.contains("mermaid") || qLower.contains("visual") || (qLower.contains("architecture") && (qLower.contains("generate") || qLower.contains("show") || qLower.contains("draw")))) {
+            sb.append("### System Architecture & Topology Diagram for `").append(repo.getRepositoryName()).append("`\n\n");
+            sb.append("Here is the visual system architecture topology diagram mapping entry routes, UI views, core logic, database persistence, and external APIs:\n\n");
+            sb.append("```mermaid\n");
+            sb.append(repo.getArchitecture().getMermaidDiagram() != null ? repo.getArchitecture().getMermaidDiagram().trim() : repo.getArchitecture().getMermaidChart().trim());
+            sb.append("\n```\n\n");
+            sb.append("#### Architectural Breakdown\n");
+            sb.append(repo.getArchitecture().getExplanation()).append("\n\n");
+            for (ArchitectureLayer layer : repo.getArchitecture().getLayers()) {
+                sb.append("- **").append(layer.getName()).append("**: ").append(layer.getDescription()).append("\n");
+            }
+            return sb.toString();
+        }
+
+        // 2. Core Components & Structure Breakdown
+        if (qLower.contains("component") || (qLower.contains("structure") && !qLower.contains("data")) || qLower.contains("folder") || (qLower.contains("module") && !qLower.contains("api"))) {
+            sb.append("### Core Components & Architecture in `").append(repo.getRepositoryName()).append("`\n\n");
+            sb.append("The repository contains **").append(repo.getComponents().size()).append("** discovered architectural components:\n\n");
+            Map<String, List<ComponentItem>> byCat = repo.getComponents().stream().collect(Collectors.groupingBy(ComponentItem::getCategory));
+            for (Map.Entry<String, List<ComponentItem>> entry : byCat.entrySet()) {
+                sb.append("#### ").append(entry.getKey()).append("\n");
+                for (ComponentItem c : entry.getValue().stream().limit(6).toList()) {
+                    sb.append("- **`").append(c.getFilePath()).append("`** (`").append(c.getLanguage()).append("`): ")
+                            .append(c.getResponsibility()).append("\n");
+                }
+                sb.append("\n");
+            }
+            return sb.toString();
+        }
+
+        // 3. APIs, Routes & Handlers Breakdown
+        if (qLower.contains("api") || qLower.contains("route") || qLower.contains("endpoint") || qLower.contains("controller") || qLower.contains("handler")) {
+            sb.append("### API Endpoints & Route Handlers in `").append(repo.getRepositoryName()).append("`\n\n");
+            if (repo.getApis().isEmpty()) {
+                sb.append("No explicit HTTP endpoints were discovered. This repository is structured as a client/service module or standalone application.\n");
+            } else {
+                sb.append("Discovered **").append(repo.getApis().size()).append("** endpoints and route handlers:\n\n");
+                for (ApiEndpointItem a : repo.getApis().stream().limit(20).toList()) {
+                    sb.append("- **`[").append(a.getMethod()).append("]`** `").append(a.getPath()).append("` (in `").append(a.getFilePath()).append("`): ")
+                            .append(a.getDescription()).append("\n");
+                }
+            }
+            return sb.toString();
+        }
+
+        // 4. Dependencies & Frameworks Audit
+        if (qLower.contains("dependenc") || qLower.contains("package") || qLower.contains("librar") || qLower.contains("tech stack")) {
+            sb.append("### Dependencies & Frameworks Audit for `").append(repo.getRepositoryName()).append("`\n\n");
+            sb.append("- **Primary Language:** ").append(repo.getOverview().getPrimaryLanguage()).append("\n");
+            sb.append("- **Detected Frameworks:** ").append(repo.getDetectedFrameworks().isEmpty() ? "Standard Library" : String.join(", ", repo.getDetectedFrameworks())).append("\n\n");
+            sb.append("#### Discovered Packages & Libraries\n\n");
+            if (repo.getDependencies().isEmpty()) {
+                sb.append("Zero external packages required (utilizes core language standard libraries).\n");
+            } else {
+                for (DependencyItem d : repo.getDependencies().stream().limit(30).toList()) {
+                    sb.append("- **`").append(d.getName()).append("`** (").append(d.getType())
+                            .append(d.getVersion() != null && !d.getVersion().isBlank() ? " " + d.getVersion() : "")
+                            .append("): ").append(d.getPurpose()).append("\n");
+                }
+            }
+            return sb.toString();
+        }
+
+        // 5. Developer Onboarding & Setup Walkthrough
+        if (qLower.contains("onboard") || qLower.contains("day") || qLower.contains("setup") || qLower.contains("how to run") || qLower.contains("install") || qLower.contains("start")) {
+            sb.append("### Developer Onboarding & Setup Walkthrough for `").append(repo.getRepositoryName()).append("`\n\n");
+            sb.append("#### 🚀 Local Quickstart Commands\n");
+            sb.append("```bash\ngit clone ").append(repo.getRepositoryUrl()).append(".git\ncd ")
+                    .append(repo.getRepositoryName().substring(repo.getRepositoryName().indexOf('/') + 1)).append("\n");
+            if (repo.getLanguageDistribution().containsKey("Python")) {
+                sb.append("pip install -r requirements.txt\n");
+                if (repo.getDetectedFrameworks().contains("Streamlit")) {
+                    sb.append("streamlit run app.py\n");
+                } else {
+                    sb.append("python app.py\n");
+                }
+            } else if (repo.getLanguageDistribution().containsKey("Java")) {
+                sb.append("./mvnw spring-boot:run\n");
+            } else {
+                sb.append("npm install\nnpm run dev\n");
+            }
+            sb.append("```\n\n");
+
+            if (repo.getOnboardingGuide() != null && !repo.getOnboardingGuide().isEmpty()) {
+                sb.append("#### 📅 5-Day Contributor Ramp-Up Plan\n\n");
+                for (OnboardingDay day : repo.getOnboardingGuide()) {
+                    sb.append("##### Day ").append(day.getDay()).append(": ").append(day.getTitle()).append("\n");
+                    sb.append("**Goal:** ").append(day.getGoal()).append("\n\n");
+                    sb.append("**Checklist:**\n");
+                    for (String t : day.getTasks()) {
+                        sb.append("- ").append(t).append("\n");
+                    }
+                    sb.append("\n");
+                }
+            }
+            return sb.toString();
+        }
+
+        // 6. Database & Persistence Layer
+        if (qLower.contains("database") || qLower.contains("model") || qLower.contains("schema") || qLower.contains("collection") || qLower.contains("persistence")) {
+            sb.append("### Database & Data Persistence in `").append(repo.getRepositoryName()).append("`\n\n");
+            sb.append("- **Database Technology:** ").append(repo.getDatabaseInfo().getDatabaseTechnology()).append("\n");
+            sb.append("- **Persistence Flow:** ").append(repo.getDatabaseInfo().getDataFlowSummary()).append("\n\n");
+            if (!repo.getDatabaseInfo().getDetectedModels().isEmpty()) {
+                sb.append("#### Discovered Models & Entities\n");
+                for (String m : repo.getDatabaseInfo().getDetectedModels()) {
+                    sb.append("- `").append(m).append("`\n");
+                }
+                sb.append("\n");
+            }
+            if (repo.getDatabaseInfo().getMermaidErDiagram() != null && !repo.getDatabaseInfo().getMermaidErDiagram().isBlank()) {
+                sb.append("#### Entity-Relationship Diagram\n\n");
+                sb.append("```mermaid\n").append(repo.getDatabaseInfo().getMermaidErDiagram().trim()).append("\n```\n");
+            }
+            return sb.toString();
+        }
+
+        // 7. Direct match on a specific file or class name
         ComponentItem directFileMatch = repo.getComponents().stream()
                 .filter(c -> {
                     String baseName = c.getName().replaceAll("\\.[a-z0-9]+$", "").toLowerCase();
@@ -1121,7 +1240,7 @@ public class RepositoryUnderstandingService {
 
         // Subgraph 1: Entry & Routing
         if (!entryComponents.isEmpty()) {
-            sb.append("    subgraph EntryLayer [\"Entry Points, Routing & Controllers\"]\n");
+            sb.append("    subgraph EntryLayer [\"Entry Points, Routing and Controllers\"]\n");
             for (ComponentItem c : entryComponents) {
                 String id = "N" + (++nodeCounter);
                 nodeIdsByFile.put(c.getFilePath(), id);
@@ -1136,7 +1255,7 @@ public class RepositoryUnderstandingService {
 
         // Subgraph 2: Views & Dashboards
         if (!viewComponents.isEmpty()) {
-            sb.append("    subgraph ViewLayer [\"Interactive Views, Dashboards & UI Components\"]\n");
+            sb.append("    subgraph ViewLayer [\"Interactive Views, Dashboards and UI Components\"]\n");
             for (ComponentItem c : viewComponents) {
                 String id = "N" + (++nodeCounter);
                 nodeIdsByFile.put(c.getFilePath(), id);
@@ -1151,7 +1270,7 @@ public class RepositoryUnderstandingService {
 
         // Subgraph 3: Core Business, AI & State Logic
         if (!coreLogicComponents.isEmpty()) {
-            sb.append("    subgraph CoreLayer [\"Core Business Services, AI & State Logic\"]\n");
+            sb.append("    subgraph CoreLayer [\"Core Business Services, AI and State Logic\"]\n");
             for (ComponentItem c : coreLogicComponents) {
                 String id = "N" + (++nodeCounter);
                 nodeIdsByFile.put(c.getFilePath(), id);
@@ -1165,7 +1284,7 @@ public class RepositoryUnderstandingService {
         }
 
         // Subgraph 4: Data Access & External Integrations
-        sb.append("    subgraph DataLayer [\"Data Access, Persistence & External APIs\"]\n");
+        sb.append("    subgraph DataLayer [\"Data Access, Persistence and External APIs\"]\n");
         for (ComponentItem c : dataComponents) {
             String id = "N" + (++nodeCounter);
             nodeIdsByFile.put(c.getFilePath(), id);
@@ -1219,7 +1338,7 @@ public class RepositoryUnderstandingService {
             // Connect AI modules to AIEngine node
             if ((frameworks.contains("Google Gemini AI") || frameworks.contains("LangChain"))
                     && (src.getResponsibility().contains("GoogleGenerativeAI") || src.getResponsibility().contains("langchain") || src.getName().contains("util") || src.getName().contains("gen"))) {
-                addedEdges.add("    " + srcId + " -.->|\"LLM Prompt\"| AIEngine");
+                addedEdges.add("    " + srcId + " -.->|LLM Prompt| AIEngine");
             }
         }
 
@@ -1259,6 +1378,7 @@ public class RepositoryUnderstandingService {
 
         return ArchitectureData.builder()
                 .mermaidDiagram(sb.toString())
+                .mermaidChart(sb.toString())
                 .explanation("Interactive GitDiagram topology synthesized from '" + fullName + "' (" + primaryLanguage + ") mapping "
                         + components.size() + " real source modules and " + addedEdges.size() + " cross-module dependency links.")
                 .layers(layers)
@@ -1267,100 +1387,7 @@ public class RepositoryUnderstandingService {
 
     private String sanitizeMermaidLabel(String raw) {
         if (raw == null) return "Module";
-        return raw.replaceAll("[\"\\[\\](){}<>;:|]", "").trim();
-    }
-
-    private List<WorkflowDiagram> buildWorkflows(
-            String fullName,
-            String primaryLanguage,
-            Set<String> frameworks,
-            List<ApiEndpointItem> apis,
-            List<ComponentItem> components,
-            DatabaseInfo dbInfo) {
-
-        List<WorkflowDiagram> list = new ArrayList<>();
-
-        // Pick actual components from this repository for dynamic workflow generation!
-        String entryName = components.stream()
-                .filter(c -> c.getCategory().contains("Entry") || c.getCategory().contains("Route") || c.getCategory().contains("Controller"))
-                .map(ComponentItem::getName).findFirst()
-                .orElse(components.isEmpty() ? "MainApp" : components.get(0).getName());
-
-        String viewOrController = components.stream()
-                .filter(c -> !c.getName().equals(entryName) && (c.getCategory().contains("View") || c.getCategory().contains("Dashboard") || c.getCategory().contains("UI") || c.getCategory().contains("Controller")))
-                .map(ComponentItem::getName).findFirst()
-                .orElse(components.size() > 1 ? components.get(1).getName() : "CoreHandler");
-
-        String serviceOrLogic = components.stream()
-                .filter(c -> !c.getName().equals(entryName) && !c.getName().equals(viewOrController)
-                        && (c.getCategory().contains("Logic") || c.getCategory().contains("Service") || c.getCategory().contains("Hook") || c.getCategory().contains("AI")))
-                .map(ComponentItem::getName).findFirst()
-                .orElse(components.size() > 2 ? components.get(2).getName() : "ServiceModule");
-
-        String dataModule = dbInfo.getDataAccessFiles().isEmpty()
-                ? dbInfo.getDatabaseTechnology()
-                : dbInfo.getDataAccessFiles().get(0);
-
-        List<String> topFuncs = apis.stream().limit(4).map(ApiEndpointItem::getPath).toList();
-        String fn1 = !topFuncs.isEmpty() ? sanitizeMermaidLabel(topFuncs.get(0)) : "initializeSession()";
-        String fn2 = topFuncs.size() > 1 ? sanitizeMermaidLabel(topFuncs.get(1)) : "processUserAction()";
-        String fn3 = topFuncs.size() > 2 ? sanitizeMermaidLabel(topFuncs.get(2)) : "executeCoreLogic()";
-
-        // Workflow 1: Dynamic Sequence Diagram with REAL repository files & functions
-        String wf1Mermaid = "sequenceDiagram\n"
-                + "    actor User\n"
-                + "    participant Entry as " + sanitizeMermaidLabel(entryName) + "\n"
-                + "    participant View as " + sanitizeMermaidLabel(viewOrController) + "\n"
-                + "    participant Logic as " + sanitizeMermaidLabel(serviceOrLogic) + "\n"
-                + "    participant Data as " + sanitizeMermaidLabel(dataModule) + "\n"
-                + "    User->>Entry: Accesses " + sanitizeMermaidLabel(fullName) + " (" + fn1 + ")\n"
-                + "    Entry->>View: Routes user to active view (" + fn2 + ")\n"
-                + "    View->>Logic: Invokes business / AI handler (" + fn3 + ")\n"
-                + "    Logic->>Data: Queries or persists in " + sanitizeMermaidLabel(dbInfo.getDatabaseTechnology()) + "\n"
-                + "    Data-->>Logic: Returns records / model state\n"
-                + "    Logic-->>User: Renders updated output in " + sanitizeMermaidLabel(viewOrController) + "\n";
-
-        list.add(WorkflowDiagram.builder()
-                .title("End-to-End Request & Execution Lifecycle (" + entryName + " -> " + dataModule + ")")
-                .description("Traces how a user action flows through " + entryName + ", " + viewOrController + ", " + serviceOrLogic + ", and " + dataModule + " in " + fullName)
-                .mermaidCode(wf1Mermaid)
-                .steps(List.of(
-                        "1. Entry point `" + entryName + "` receives user interaction and triggers `" + fn1 + "`.",
-                        "2. Control routes to `" + viewOrController + "` (`" + fn2 + "`) to coordinate UI/request parameters.",
-                        "3. Core module `" + serviceOrLogic + "` executes `" + fn3 + "` and processes domain/AI rules.",
-                        "4. Data layer `" + dataModule + "` reads/writes state via " + dbInfo.getDatabaseTechnology() + " and returns the response."
-                ))
-                .build());
-
-        // Workflow 2: Dynamic Module Call & Feature Flow built from discovered components
-        StringBuilder wf2 = new StringBuilder("flowchart LR\n");
-        List<ComponentItem> wfComps = components.stream().limit(6).toList();
-        for (int i = 0; i < wfComps.size(); i++) {
-            ComponentItem c = wfComps.get(i);
-            wf2.append("    M").append(i).append("[\"").append(sanitizeMermaidLabel(c.getName()))
-                    .append("\\n(").append(sanitizeMermaidLabel(c.getCategory())).append(")\"]\n");
-            if (i > 0) {
-                wf2.append("    M").append(i - 1).append(" --> M").append(i).append("\n");
-            }
-        }
-        if (wfComps.isEmpty()) {
-            wf2.append("    M0[\"Repository Root\"] --> M1[\"Core Modules\"]\n");
-        }
-
-        List<String> wf2Steps = new ArrayList<>();
-        for (int i = 0; i < wfComps.size(); i++) {
-            ComponentItem c = wfComps.get(i);
-            wf2Steps.add((i + 1) + ". `" + c.getFilePath() + "`: " + c.getResponsibility());
-        }
-
-        list.add(WorkflowDiagram.builder()
-                .title("Repository Module Interaction Pipeline")
-                .description("How the primary source files in " + fullName + " collaborate across layers")
-                .mermaidCode(wf2.toString())
-                .steps(wf2Steps.isEmpty() ? List.of("1. Initialize repository modules") : wf2Steps)
-                .build());
-
-        return list;
+        return raw.replace("&", "and").replaceAll("[\"\\[\\](){}<>;:|]", "").trim();
     }
 
     private DatabaseInfo buildDatabaseInfo(

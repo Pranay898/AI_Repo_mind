@@ -4,14 +4,11 @@ import {
   FolderGit2,
   Share2,
   FolderTree,
-  GitBranch,
   Cpu,
   Globe,
   Database,
   Package,
   GraduationCap,
-  MessageSquare,
-  Search,
   RefreshCw,
   ChevronRight,
   ChevronDown,
@@ -41,6 +38,7 @@ mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
   securityLevel: 'loose',
+  suppressErrorRendering: true,
   fontFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 });
 
@@ -164,8 +162,26 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
           const lines = block.slice(3, -3).trim().split('\n');
           const firstLine = lines[0]?.trim() || '';
           const hasLang = /^[a-zA-Z0-9_-]+$/.test(firstLine);
-          const language = hasLang ? firstLine : 'code';
+          const language = (hasLang ? firstLine : 'code').toLowerCase();
           const codeString = hasLang ? lines.slice(1).join('\n') : lines.join('\n');
+          const trimmedCode = codeString.trim();
+
+          const isMermaid =
+            language === 'mermaid' ||
+            trimmedCode.startsWith('flowchart') ||
+            trimmedCode.startsWith('graph ') ||
+            trimmedCode.startsWith('sequenceDiagram') ||
+            trimmedCode.startsWith('classDiagram') ||
+            trimmedCode.startsWith('erDiagram') ||
+            trimmedCode.startsWith('stateDiagram');
+
+          if (isMermaid) {
+            return (
+              <div key={blockIdx} className="my-3">
+                <MermaidChart chart={codeString} title="Gitly AI Generated Diagram" />
+              </div>
+            );
+          }
 
           return (
             <div
@@ -302,32 +318,82 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
   );
 }
 
+let mermaidSeq = 0;
+
 /**
  * Interactive Mermaid Architecture Diagram Viewer.
  */
-function MermaidChart({ chart, title }: { chart: string; title?: string }) {
+function MermaidChart({ chart, title }: { chart?: string; title?: string }) {
   const [svgContent, setSvgContent] = useState<string>('');
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(1);
   const [copied, setCopied] = useState<boolean>(false);
   const [showRaw, setShowRaw] = useState<boolean>(false);
 
   useEffect(() => {
-    let isMounted = true;
+    let isCancelled = false;
+    const seq = ++mermaidSeq;
+
     const renderDiagram = async () => {
-      if (!chart || !chart.trim()) return;
+      const code = (chart || '').trim();
+      if (!code) {
+        if (!isCancelled) {
+          setSvgContent('');
+          setRenderError(null);
+        }
+        return;
+      }
+      setRenderError(null);
+
+      // Clean common syntax edge-cases across versions safely
+      const cleanCode = code
+        .replace(/&/g, 'and')
+        .replace(/\|"([^"]+)"\|/g, '|$1|')
+        .replace(/-\.->\|"([^"]+)"\|/g, '-.->|$1|')
+        .replace(/-->\|"([^"]+)"\|/g, '-->|$1|')
+        .replace(/\\n/g, '<br/>')
+        .trim();
+
+      const id = 'mmd_' + seq + '_' + Math.random().toString(36).substring(2, 8);
+
       try {
-        const id = 'mermaid-svg-' + Math.random().toString(36).substring(2, 9);
-        const { svg } = await mermaid.render(id, chart);
-        if (isMounted) setSvgContent(svg);
-      } catch (err) {
-        console.error('Mermaid render error:', err);
+        const { svg } = await mermaid.render(id, cleanCode);
+        if (!isCancelled) {
+          setSvgContent(svg);
+          setRenderError(null);
+        }
+      } catch (err: any) {
+        console.warn('Initial Mermaid render warning, attempting fallback render:', err);
+        try {
+          const fallbackCode = cleanCode
+            .replace(/classDef.*$/gm, '')
+            .replace(/:::[\w]+/g, '')
+            .trim();
+          const fallbackId = 'mmd_fb_' + seq + '_' + Math.random().toString(36).substring(2, 8);
+          const { svg: fbSvg } = await mermaid.render(fallbackId, fallbackCode);
+          if (!isCancelled) {
+            setSvgContent(fbSvg);
+            setRenderError(null);
+          }
+        } catch (e2: any) {
+          console.error('All Mermaid render attempts failed:', e2);
+          if (!isCancelled) {
+            setRenderError(err?.message || 'Syntax error rendering diagram');
+            setSvgContent('');
+          }
+        }
       }
     };
+
     renderDiagram();
-    return () => { isMounted = false; };
+
+    return () => {
+      isCancelled = true;
+    };
   }, [chart]);
 
   const handleCopy = () => {
+    if (!chart) return;
     navigator.clipboard.writeText(chart);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -376,7 +442,8 @@ function MermaidChart({ chart, title }: { chart: string; title?: string }) {
           </button>
           <button
             onClick={handleCopy}
-            className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-slate-300 hover:bg-white/[0.08] flex items-center space-x-1.5 transition"
+            disabled={!chart}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-slate-300 hover:bg-white/[0.08] disabled:opacity-40 flex items-center space-x-1.5 transition"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span>{copied ? 'Copied' : 'Copy'}</span>
@@ -386,7 +453,7 @@ function MermaidChart({ chart, title }: { chart: string; title?: string }) {
 
       {showRaw ? (
         <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto bg-[#07090E]">
-          {chart}
+          {chart || '// No diagram source generated'}
         </pre>
       ) : (
         <div className="p-8 overflow-auto flex items-center justify-center min-h-[420px] bg-[#07090E] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]">
@@ -395,6 +462,18 @@ function MermaidChart({ chart, title }: { chart: string; title?: string }) {
               style={{ transform: `scale(${zoom})`, transformOrigin: 'center center', transition: 'transform 0.15s ease' }}
               dangerouslySetInnerHTML={{ __html: svgContent }}
             />
+          ) : renderError ? (
+            <div className="text-center p-6 space-y-3">
+              <div className="text-xs font-mono text-rose-400">Unable to render visual topology: {renderError}</div>
+              <button
+                onClick={() => setShowRaw(true)}
+                className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-xs font-mono text-slate-200"
+              >
+                Inspect Mermaid Source
+              </button>
+            </div>
+          ) : !chart ? (
+            <div className="text-xs text-slate-500 font-mono">No diagram topology available for this repository.</div>
           ) : (
             <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono">
               <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
@@ -472,11 +551,10 @@ export function App() {
   const [geminiActive, setGeminiActive] = useState(false);
 
   const [activeTab, setActiveTab] = useState<
-    'architecture' | 'chat' | 'overview' | 'explorer' | 'workflows' | 'components' | 'apis' | 'database' | 'dependencies' | 'onboarding'
+    'architecture' | 'chat' | 'overview' | 'explorer' | 'database'
   >('architecture');
 
   const [selectedFileNode, setSelectedFileNode] = useState<any | null>(null);
-  const [compSearch, setCompSearch] = useState('');
 
   // ChatGPT State
   const [chatMessages, setChatMessages] = useState<
@@ -533,7 +611,6 @@ export function App() {
         throw new Error(data.message || 'Failed to analyze repository');
       }
       setAnalysis(data);
-      setCompSearch('');
       if (data.fileTree && data.fileTree.length > 0) {
         setSelectedFileNode(data.fileTree[0]);
       }
@@ -545,13 +622,13 @@ export function App() {
           thoughts: data.agentThinkingSteps || [
             `Scanned ${data.totalFiles} files across ${data.totalDirectories} directories`,
             `Identified primary language: ${Object.keys(data.languageDistribution || {})[0] || 'Unknown'}`,
-            `Mapped architecture and components into visual topology`
+            `Mapped architecture into interactive visual topology`
           ],
-          text: `Hello! I have analyzed **${data.repositoryName}**.\n\n`
+          text: `👋 Welcome! I am **Gitly AI**, your codebase intelligence copilot for **${data.repositoryName}**.\n\n`
             + `- **Language Stack:** ${Object.keys(data.languageDistribution || {}).join(', ') || 'Multi-language'}\n`
             + `- **Frameworks:** ${(data.detectedFrameworks || []).join(', ') || 'Standard'}\n`
-            + `- **Data Layer:** ${data.databaseInfo?.databaseTechnology || 'Application State'}\n\n`
-            + `You can ask me any question like in ChatGPT: file locations, execution flow, function logic, bugs, or how to run it locally.`
+            + `- **Persistence:** ${data.databaseInfo?.databaseTechnology || 'Application State'}\n\n`
+            + `Ask me anything about this repository, request interactive architecture diagrams, or select one of the suggested deep-dives below:`
         }
       ]);
     } catch (err: any) {
@@ -612,34 +689,58 @@ export function App() {
     askQuestion(chatQuestion);
   };
 
-  const suggestedPrompts = [
-    `Explain the project architecture and data flow`,
-    `Walk me through the main entrypoint file`,
-    `What database, tables, or collections are configured?`,
-    `How do I set up and run this codebase locally?`,
-    `What are the critical dependencies and external APIs?`
+  const defaultQuestions = [
+    {
+      id: 'components',
+      title: 'Components & Structure',
+      description: 'Explore primary source modules, layers, and responsibilities',
+      icon: Cpu,
+      prompt: 'Break down the core components, modules, and folder architecture of this repository and their responsibilities.'
+    },
+    {
+      id: 'apis',
+      title: 'APIs, Routes & Handlers',
+      description: 'Inspect all endpoints, HTTP controllers, and functions',
+      icon: Globe,
+      prompt: 'List all API endpoints, routes, controllers, and functions discovered in this repository with their methods, parameters, and roles.'
+    },
+    {
+      id: 'dependencies',
+      title: 'Dependencies & Tech Stack',
+      description: 'Audit external packages, frameworks, and runtime libraries',
+      icon: Package,
+      prompt: 'Audit all external dependencies, libraries, and frameworks used in this project and explain what each is used for.'
+    },
+    {
+      id: 'onboarding',
+      title: '5-Day Onboarding Guide',
+      description: 'Get local setup commands, architecture model, and 5-day plan',
+      icon: GraduationCap,
+      prompt: 'Generate a comprehensive 5-day developer onboarding guide: prerequisites, local setup steps, architecture mental model, and how to make the first code contribution.'
+    },
+    {
+      id: 'diagram',
+      title: 'Generate System Diagram',
+      description: 'Synthesize interactive Mermaid architecture & data flow',
+      icon: Share2,
+      prompt: 'Generate a detailed Mermaid diagram illustrating the end-to-end data flow and architecture of this repository.'
+    },
+    {
+      id: 'database',
+      title: 'Database & Data Models',
+      description: 'Examine collections, entities, schemas, and persistence flow',
+      icon: Database,
+      prompt: 'Explain the database models, collections, persistence layer, and data query flows configured in this repository.'
+    }
   ];
 
   const navTabs = [
     { id: 'architecture', label: 'Architecture', icon: Share2, count: null },
-    { id: 'chat', label: 'Codebase ChatGPT', icon: MessageSquare, count: null },
+    { id: 'chat', label: 'Gitly AI', icon: Sparkles, count: null },
     { id: 'overview', label: 'Overview', icon: Layers, count: null },
     { id: 'explorer', label: 'Files', icon: FolderTree, count: analysis?.totalFiles || null },
-    { id: 'workflows', label: 'Workflows', icon: GitBranch, count: analysis?.workflows?.length || null },
-    { id: 'components', label: 'Components', icon: Cpu, count: analysis?.components?.length || null },
-    { id: 'apis', label: 'APIs & Routes', icon: Globe, count: analysis?.apis?.length || null },
-    { id: 'database', label: 'Data Models', icon: Database, count: analysis?.databaseInfo?.detectedModels?.length || null },
-    { id: 'dependencies', label: 'Dependencies', icon: Package, count: analysis?.dependencies?.length || null },
-    { id: 'onboarding', label: 'Onboarding Guide', icon: GraduationCap, count: null }
+    { id: 'database', label: 'Data Models', icon: Database, count: analysis?.databaseInfo?.detectedModels?.length || null }
   ] as const;
-
-  const filteredComponents = (analysis?.components || []).filter(
-    (c: any) =>
-      c.name.toLowerCase().includes(compSearch.toLowerCase()) ||
-      c.category.toLowerCase().includes(compSearch.toLowerCase()) ||
-      c.filePath.toLowerCase().includes(compSearch.toLowerCase()) ||
-      c.responsibility.toLowerCase().includes(compSearch.toLowerCase())
-  );
 
   return (
     <div className={`min-h-screen flex flex-col font-sans ${isDark ? 'bg-[#07090E] text-slate-200' : 'bg-slate-50 text-slate-900'}`}>
@@ -654,10 +755,10 @@ export function App() {
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-bold text-sm tracking-tight text-white">RepoMind</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">AI 2.0</span>
+              <span className="font-bold text-sm tracking-tight text-white">Gitly</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">AI</span>
             </div>
-            <p className="text-[10px] text-slate-400 tracking-wide font-medium">Visual Codebase Intelligence</p>
+            <p className="text-[10px] text-slate-400 tracking-wide font-medium">Visual Repository Intelligence</p>
           </div>
         </div>
 
@@ -776,7 +877,7 @@ export function App() {
             </h1>
 
             <p className="text-sm text-slate-400 max-w-xl mx-auto leading-relaxed">
-              Generate architecture topology diagrams, inspect multi-language AST components, trace workflows, and chat with an intelligent codebase ChatGPT.
+              Synthesize visual system architecture topology, explore code hierarchies, and chat with Gitly AI to generate interactive diagrams and explore any repository.
             </p>
           </div>
 
@@ -788,27 +889,27 @@ export function App() {
               </div>
               <h3 className="font-semibold text-sm text-white">Visual Architecture</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Automatic GitDiagram topology mapping layers, services, controllers, and data models.
+                Automatic GitDiagram topology mapping entrypoints, services, controllers, and databases.
               </p>
             </div>
 
             <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0E131E]/60 backdrop-blur-md space-y-2">
               <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                <MessageSquare className="w-4 h-4" />
+                <Sparkles className="w-4 h-4" />
               </div>
-              <h3 className="font-semibold text-sm text-white">Codebase ChatGPT</h3>
+              <h3 className="font-semibold text-sm text-white">Gitly AI Intelligence</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Multi-turn conversation powered by Gemini AI with live source code grounded references.
+                ChatGPT-style codebase copilot that answers architectural questions and renders live visual diagrams.
               </p>
             </div>
 
             <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0E131E]/60 backdrop-blur-md space-y-2">
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                <GraduationCap className="w-4 h-4" />
+                <Database className="w-4 h-4" />
               </div>
-              <h3 className="font-semibold text-sm text-white">5-Day Onboarding</h3>
+              <h3 className="font-semibold text-sm text-white">Data & Persistence</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Tailored ramp-up guides for newly joined developers without senior dependency.
+                Deep inspection of persistence models, database collections, schemas, and ER relationship diagrams.
               </p>
             </div>
           </div>
@@ -878,7 +979,10 @@ export function App() {
             {/* 1. ARCHITECTURE TOPOLOGY TAB */}
             {activeTab === 'architecture' && (
               <div className="space-y-6 max-w-6xl mx-auto">
-                <MermaidChart chart={analysis.architecture?.mermaidChart} title={`${analysis.repositoryName} — Architecture Topology`} />
+                <MermaidChart
+                  chart={analysis.architecture?.mermaidChart || analysis.architecture?.mermaidDiagram || ''}
+                  title={`${analysis.repositoryName} — Architecture Topology`}
+                />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className={`p-5 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
@@ -922,10 +1026,10 @@ export function App() {
                     </div>
                     <div>
                       <div className="text-xs font-semibold text-white flex items-center space-x-2">
-                        <span>RepoMind Codebase Assistant</span>
+                        <span>Gitly AI Codebase Assistant</span>
                         <span className="flex items-center space-x-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.2 rounded-full border border-emerald-500/20">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>{geminiActive ? 'Gemini 1.5 Flash (Live)' : 'RepoMind Reasoning Engine'}</span>
+                          <span>{geminiActive ? 'Gemini 3.5 Flash (Live)' : 'Gitly AI Reasoning Engine'}</span>
                         </span>
                       </div>
                     </div>
@@ -936,7 +1040,7 @@ export function App() {
                       setChatMessages([
                         {
                           role: 'assistant',
-                          text: `New conversation started for **${analysis.repositoryName}**. Ask any question about its code, functions, or architecture.`
+                          text: `👋 New conversation started for **${analysis.repositoryName}**. Ask me any question about the codebase, request diagrams, or select a topic below.`
                         }
                       ]);
                     }}
@@ -1006,7 +1110,6 @@ export function App() {
                                 key={i}
                                 onClick={() => {
                                   setActiveTab('explorer');
-                                  // Find node in fileTree
                                   const findNode = (nodes: any[]): any => {
                                     for (const n of nodes) {
                                       if (n.path === f) return n;
@@ -1037,10 +1140,44 @@ export function App() {
                     </div>
                   ))}
 
+                  {/* Default Questions Cards Grid when chat has <= 1 messages */}
+                  {chatMessages.length <= 1 && (
+                    <div className="pt-2 pl-11 space-y-2.5">
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold">
+                        Recommended Deep-Dives & Architecture Prompts
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {defaultQuestions.map((q) => {
+                          const Icon = q.icon;
+                          return (
+                            <button
+                              key={q.id}
+                              onClick={() => askQuestion(q.prompt)}
+                              disabled={chatLoading}
+                              className="p-3 rounded-xl border border-white/[0.08] bg-[#0E131E] hover:bg-[#151C2C] hover:border-emerald-500/40 text-left transition group shadow-sm flex items-start space-x-3"
+                            >
+                              <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 group-hover:scale-105 transition shrink-0">
+                                <Icon className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-white group-hover:text-emerald-300 transition">
+                                  {q.title}
+                                </div>
+                                <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                                  {q.description}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {chatLoading && (
                     <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono py-2 pl-12">
                       <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                      <span>RepoMind AI is thinking...</span>
+                      <span>Gitly AI is thinking...</span>
                     </div>
                   )}
                   <div ref={chatEndRef} />
@@ -1050,20 +1187,24 @@ export function App() {
                 <div className={`px-4 py-2 border-x flex flex-wrap gap-1.5 ${
                   isDark ? 'bg-[#0A0D14] border-white/[0.08]' : 'bg-slate-100 border-slate-200'
                 }`}>
-                  {suggestedPrompts.map(p => (
-                    <button
-                      key={p}
-                      onClick={() => askQuestion(p)}
-                      disabled={chatLoading}
-                      className={`text-[11px] px-3 py-1 rounded-xl border transition ${
-                        isDark
-                          ? 'border-white/[0.08] bg-[#0E131E] hover:border-emerald-500/40 text-slate-400 hover:text-emerald-300'
-                          : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
+                  {defaultQuestions.map((q) => {
+                    const Icon = q.icon;
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => askQuestion(q.prompt)}
+                        disabled={chatLoading}
+                        className={`text-[11px] px-2.5 py-1 rounded-xl border transition flex items-center space-x-1.5 ${
+                          isDark
+                            ? 'border-white/[0.08] bg-[#0E131E] hover:border-emerald-500/40 text-slate-400 hover:text-emerald-300'
+                            : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
+                        }`}
+                      >
+                        <Icon className="w-3 h-3 text-emerald-400" />
+                        <span>{q.title}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Bottom Input Area */}
@@ -1220,115 +1361,7 @@ export function App() {
               </div>
             )}
 
-            {/* 5. WORKFLOWS TAB */}
-            {activeTab === 'workflows' && (
-              <div className="space-y-6 max-w-5xl mx-auto">
-                {(analysis.workflows || []).map((wf: any, idx: number) => (
-                  <div key={idx} className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200 shadow-sm'}`}>
-                    <div className="flex items-center space-x-3 mb-2">
-                      <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-mono text-xs font-bold">
-                        {idx + 1}
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-sm text-white">{wf.title}</h3>
-                        <p className="text-xs text-slate-400">{wf.description}</p>
-                      </div>
-                    </div>
-
-                    {wf.mermaidChart && (
-                      <div className="my-4">
-                        <MermaidChart chart={wf.mermaidChart} title={wf.title} />
-                      </div>
-                    )}
-
-                    <div className="space-y-1.5 mt-3">
-                      <div className="text-xs font-semibold text-slate-300 mb-1">Execution Steps:</div>
-                      {(wf.steps || []).map((s: string, sIdx: number) => (
-                        <div key={sIdx} className="flex items-start space-x-2 text-xs text-slate-300">
-                          <span className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-mono flex items-center justify-center shrink-0 mt-0.5">
-                            {sIdx + 1}
-                          </span>
-                          <span>{s}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* 6. COMPONENTS TAB */}
-            {activeTab === 'components' && (
-              <div className="space-y-4 max-w-5xl mx-auto">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={compSearch}
-                    onChange={e => setCompSearch(e.target.value)}
-                    placeholder="Search classes, controllers, services, models..."
-                    className={`w-full rounded-xl pl-9 pr-3 py-2 text-xs font-mono border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
-                      isDark ? 'bg-[#0E131E] border-white/[0.08] text-white placeholder-slate-500' : 'bg-white border-slate-300'
-                    }`}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {filteredComponents.map((c: any, idx: number) => (
-                    <div key={idx} className={`p-4 rounded-xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="font-mono text-xs font-bold text-white">{c.name}</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          {c.category}
-                        </span>
-                      </div>
-                      <div className="text-[11px] font-mono text-slate-400 mb-2 truncate">{c.filePath}</div>
-                      <div className="text-xs text-slate-300 leading-relaxed mb-2">{c.responsibility}</div>
-                      {c.relatedComponents && c.relatedComponents.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-white/[0.06]">
-                          {c.relatedComponents.map((dep: string, dIdx: number) => (
-                            <span key={dIdx} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] text-slate-400">
-                              {dep}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 7. APIS TAB */}
-            {activeTab === 'apis' && (
-              <div className="space-y-4 max-w-5xl mx-auto">
-                <div className="grid grid-cols-1 gap-2.5">
-                  {(analysis.apis || []).map((api: any, idx: number) => (
-                    <div key={idx} className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-mono ${
-                      isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
-                    }`}>
-                      <div className="flex items-center space-x-3">
-                        <span className={`px-2 py-1 rounded text-[11px] font-bold ${
-                          api.method === 'GET' ? 'bg-sky-500/15 text-sky-400' :
-                          api.method === 'POST' ? 'bg-emerald-500/15 text-emerald-400' :
-                          api.method === 'PUT' ? 'bg-amber-500/15 text-amber-400' :
-                          'bg-rose-500/15 text-rose-400'
-                        }`}>
-                          {api.method}
-                        </span>
-                        <span className="font-semibold text-white">{api.path}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-slate-400">{api.description}</span>
-                        <span className="text-[10px] text-slate-500 block">{api.filePath}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 8. DATABASE TAB */}
+            {/* 5. DATABASE TAB */}
             {activeTab === 'database' && (
               <div className="space-y-6 max-w-5xl mx-auto">
                 <div className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
@@ -1336,6 +1369,11 @@ export function App() {
                   <div className="text-xs text-slate-300 leading-relaxed mb-4">
                     {analysis.databaseInfo?.dataFlowSummary}
                   </div>
+                  {analysis.databaseInfo?.mermaidErDiagram && (
+                    <div className="my-4">
+                      <MermaidChart chart={analysis.databaseInfo.mermaidErDiagram} title="Entity Models Relationship" />
+                    </div>
+                  )}
                   <div className="text-xs font-semibold text-white mb-2">Discovered Models & Tables:</div>
                   <div className="flex flex-wrap gap-2">
                     {(analysis.databaseInfo?.detectedModels || []).map((m: string, idx: number) => (
@@ -1345,52 +1383,6 @@ export function App() {
                     ))}
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* 9. DEPENDENCIES TAB */}
-            {activeTab === 'dependencies' && (
-              <div className="space-y-4 max-w-5xl mx-auto">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {(analysis.dependencies || []).map((dep: any, idx: number) => (
-                    <div key={idx} className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-mono ${
-                      isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
-                    }`}>
-                      <div>
-                        <div className="font-bold text-white">{dep.name}</div>
-                        <div className="text-[10px] text-slate-400">{dep.purpose}</div>
-                      </div>
-                      <span className="px-2 py-0.5 rounded bg-white/[0.06] text-slate-300 text-[11px]">
-                        {dep.version || 'detected'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 10. ONBOARDING GUIDE TAB */}
-            {activeTab === 'onboarding' && (
-              <div className="space-y-6 max-w-5xl mx-auto">
-                {(analysis.onboardingGuide || []).map((day: any, idx: number) => (
-                  <div key={idx} className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
-                    <div className="flex items-center space-x-3 mb-2">
-                      <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400">
-                        Day {day.day}
-                      </span>
-                      <h3 className="font-bold text-sm text-white">{day.title}</h3>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed mb-3">{day.goal}</p>
-                    <div className="space-y-1.5 pl-4 border-l-2 border-emerald-500/30">
-                      {(day.tasks || []).map((task: string, tIdx: number) => (
-                        <div key={tIdx} className="text-xs text-slate-400 flex items-center space-x-2">
-                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          <span>{task}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </div>

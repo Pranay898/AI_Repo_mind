@@ -1,14 +1,14 @@
-# RepoMind AI — Visual Repository Understanding & Onboarding Platform
+# Gitly AI — Visual Repository Intelligence & Codebase AI Platform
 
-> **Understand any unfamiliar GitHub repository visually. Onboard faster with automated architecture topologies, AST symbol extraction, and contextual AI codebase chat.**
+> **Understand any unfamiliar GitHub repository visually. Onboard faster with automated architecture topologies, AST symbol extraction, and interactive diagram-generating Gitly AI chat.**
 
 ---
 
 ## 📌 Overview
 
-**RepoMind AI** is an open-source visual codebase intelligence platform built to help software engineers and new joiners understand complex, unfamiliar codebases without needing to schedule hours of senior developer walkthroughs.
+**Gitly AI** is an open-source visual codebase intelligence platform built to help software engineers and developers understand complex, unfamiliar codebases effortlessly.
 
-By simply providing a public GitHub repository URL, RepoMind clones the tree, performs static AST and manifest code analysis across multiple programming languages, synthesizes interactive **GitDiagram-style visual system topologies**, maps data models, and provides a contextual **ChatGPT-style codebase assistant** backed by Google Gemini.
+By simply providing a public GitHub repository URL, Gitly clones the tree, performs static AST and manifest code analysis across multiple programming languages, synthesizes interactive **GitDiagram-style visual system topologies**, maps data models, and provides **Gitly AI** — a conversational copilot that can explain architecture, audit dependencies, break down APIs, guide developer onboarding, and synthesize custom visual Mermaid diagrams on demand.
 
 ---
 
@@ -19,27 +19,25 @@ By simply providing a public GitHub repository URL, RepoMind clones the tree, pe
    - Renders live interactive SVG topologies via Mermaid with zoom, pan, reset, and raw source export.
    - Connects components using real static import relationships (`import`, `from X import Y`).
 
-2. **Deep Polyglot Code Intelligence**:
+2. **Gitly AI Codebase Assistant (with Live Diagram Synthesis)**:
+   - Ask natural language questions about any file, workflow, authentication mechanism, or database query.
+   - **Generates Diagrams on the Fly**: Whenever requested, Gitly AI creates valid Mermaid diagrams that render interactively inside the chat stream.
+   - Built-in default deep-dive prompts for **Components & Architecture**, **APIs & Route Handlers**, **Dependencies Audit**, **5-Day Onboarding Guide**, and **Data Models**.
+   - Integrates Google Gemini LLMs with automatic multi-model fallback (`gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-flash`) + offline reasoning engine.
+
+3. **Deep Polyglot Code Intelligence**:
    - **Java & Spring Boot**: Detects `@RestController`, `@Service`, `@Repository`, `@Entity`, and mapped HTTP routes.
    - **Python**: Detects Streamlit views, FastAPI/Flask route handlers, function definitions (`def ...`), and Firestore/SQL queries.
    - **TypeScript & React / Next.js**: Maps page routes, UI components, custom hooks, and state context providers.
    - **Go, Rust, C#, PHP**: Extracts primary modules and ecosystem packages.
 
-3. **Codebase Q&A Assistant (ChatGPT-Style)**:
-   - Ask natural language questions about any file, workflow, authentication mechanism, or database query.
-   - Integrates Google Gemini LLMs with automatic multi-model fallback (`gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash-latest`).
-   - Includes a **Local Codebase Reasoning Agent** that operates without an external API key by scoring in-memory source files and citing exact code excerpts.
-
 4. **Interactive File & Module Explorer**:
    - Interactive folder and file tree with automatic role summaries explaining what each file and directory is responsible for.
 
-5. **Execution Workflows & Sequence Traces**:
-   - Generates end-to-end sequence diagrams tracing how requests move from entry points into business services and data storage.
+5. **Data & Persistence Layer**:
+   - Deep inspection of database technologies, models, collections, and Entity-Relationship diagrams.
 
-6. **5-Day Developer Onboarding Roadmap**:
-   - Generates an actionable, day-by-day learning plan customized specifically to the analyzed repository's architecture and entry files.
-
-7. **Zero-Database Lightweight Deployment**:
+6. **Zero-Database Lightweight Deployment**:
    - Runs in-memory with zero external database dependencies (PostgreSQL/Redis are not required).
 
 ---
@@ -50,7 +48,7 @@ By simply providing a public GitHub repository URL, RepoMind clones the tree, pe
 flowchart TB
     Client["Browser / Developer Workbench\n(React 18 + Vite + Tailwind CSS)"]
 
-    subgraph Backend ["RepoMind Backend Core (Spring Boot 3.3.x / Java 17/21)"]
+    subgraph Backend ["Gitly Backend Core (Spring Boot 3.3.x / Java 17/21)"]
         Controller["RepositoryController\n(/api/v1/repositories)"]
         
         subgraph Engine ["Understanding & Analysis Engine"]

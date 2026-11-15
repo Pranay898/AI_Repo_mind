@@ -25,23 +25,27 @@ public class GeminiAIService {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
+    // Cache the last verified working model so subsequent requests are instant
+    private volatile String lastWorkingModel;
+
     // Cache discovered models per API key
     private final Map<String, List<String>> discoveredModelsCache = new ConcurrentHashMap<>();
 
-    // Fallback models in priority order based on Google AI Studio latest endpoints
+    // Fallback models in priority order: prioritizing high-availability standard Flash models
     private static final String[] STATIC_FALLBACK_MODELS = {
-            "gemini-3.8-flash",
+            "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-pro"
+            "gemini-3.1-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-flash-latest"
     };
 
     public GeminiAIService(
-            @Value("${repomind.gemini.api-key:}") String injectedKey,
-            @Value("${repomind.gemini.model:gemini-3.8-flash}") String configuredModel) {
+            @Value("${gitly.gemini.api-key:${repomind.gemini.api-key:}}") String injectedKey,
+            @Value("${gitly.gemini.model:${repomind.gemini.model:gemini-3.5-flash}}") String configuredModel) {
         this.configuredModel = configuredModel;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
@@ -93,6 +97,8 @@ public class GeminiAIService {
     public void setRuntimeApiKey(String newKey) {
         if (newKey != null && !newKey.trim().isEmpty()) {
             this.apiKey = newKey.trim();
+            this.lastWorkingModel = null;
+            this.discoveredModelsCache.clear();
             log.info("Updated Gemini API key at runtime (length={})", this.apiKey.length());
         }
     }
@@ -123,6 +129,7 @@ public class GeminiAIService {
         for (String model : modelsToTry) {
             String res = invokeModel(model, prompt, activeKey);
             if (res != null && !res.isBlank()) {
+                this.lastWorkingModel = model;
                 return res;
             }
         }
@@ -148,6 +155,7 @@ public class GeminiAIService {
         for (String model : modelsToTry) {
             String res = invokeChatModel(model, systemInstruction, history, question, activeKey);
             if (res != null && !res.isBlank()) {
+                this.lastWorkingModel = model;
                 return res;
             }
         }
@@ -155,18 +163,29 @@ public class GeminiAIService {
     }
 
     /**
-     * Dynamically discovers supported models from Google's ModelService.ListModels API.
-     * Caches the list to avoid latency on subsequent calls.
+     * Builds list of candidate models:
+     * 1. Last successfully working model
+     * 2. Configured model
+     * 3. Discovered models from Google API (filtered for text/chat, prioritized by stability)
+     * 4. Static fallbacks
      */
     private List<String> buildModelList(String activeKey) {
         List<String> models = new ArrayList<>();
 
-        // Add explicitly configured model if set
-        if (configuredModel != null && !configuredModel.isBlank()) {
-            models.add(cleanModelName(configuredModel));
+        // If we recently succeeded with a model, put it at the very top
+        if (lastWorkingModel != null && !lastWorkingModel.isBlank()) {
+            models.add(lastWorkingModel);
         }
 
-        // Check if we have already discovered models from Google API
+        // Add explicitly configured model
+        if (configuredModel != null && !configuredModel.isBlank()) {
+            String cleanConf = cleanModelName(configuredModel);
+            if (!models.contains(cleanConf)) {
+                models.add(cleanConf);
+            }
+        }
+
+        // Check cache or discover from Google API
         List<String> discovered = discoveredModelsCache.get(activeKey);
         if (discovered == null || discovered.isEmpty()) {
             discovered = queryGoogleForSupportedModels(activeKey);
@@ -183,7 +202,7 @@ public class GeminiAIService {
             }
         }
 
-        // Add static fallbacks as safeguards
+        // Static fallbacks
         for (String fallback : STATIC_FALLBACK_MODELS) {
             if (!models.contains(fallback)) {
                 models.add(fallback);
@@ -223,19 +242,19 @@ public class GeminiAIService {
                         if (supportsGenerate) {
                             String name = cleanModelName(m.path("name").asText(""));
                             if (!name.isBlank()) {
-                                usable.add(name);
+                                // Filter out non-text/specialized models
+                                if (!name.contains("-tts") && !name.contains("-image") && !name.contains("-transcribe")
+                                        && !name.contains("lyria") && !name.contains("robotics") && !name.contains("computer-use")) {
+                                    usable.add(name);
+                                }
                             }
                         }
                     }
 
-                    // Sort flash/chat models to the top
-                    usable.sort((a, b) -> {
-                        int aScore = (a.contains("flash") ? 10 : 0) + (a.contains("3.") ? 5 : 0) + (a.contains("2.") ? 3 : 0);
-                        int bScore = (b.contains("flash") ? 10 : 0) + (b.contains("3.") ? 5 : 0) + (b.contains("2.") ? 3 : 0);
-                        return Integer.compare(bScore, aScore);
-                    });
+                    // Prioritize stable flash models: 3.5-flash, 3.5-flash-lite, 2.5-flash, 3.1-flash-lite
+                    usable.sort((a, b) -> Integer.compare(scoreModel(b), scoreModel(a)));
 
-                    log.info("Discovered active Google Gemini models: {}", usable);
+                    log.info("Discovered and prioritized text Gemini models: {}", usable);
                     return usable;
                 }
             } else {
@@ -245,6 +264,18 @@ public class GeminiAIService {
             log.warn("ModelService.ListModels call failed: {}", e.getMessage());
         }
         return Collections.emptyList();
+    }
+
+    private int scoreModel(String name) {
+        int score = 0;
+        if (name.contains("flash")) score += 20;
+        if (name.equals("gemini-3.5-flash")) score += 50;
+        else if (name.equals("gemini-3.5-flash-lite")) score += 45;
+        else if (name.equals("gemini-2.5-flash")) score += 40;
+        else if (name.equals("gemini-3.1-flash-lite")) score += 35;
+        else if (name.equals("gemini-3.8-flash")) score += 10; // lower score due to high demand spikes
+        else if (name.contains("preview")) score -= 5;
+        return score;
     }
 
     private String cleanModelName(String raw) {
@@ -281,6 +312,8 @@ public class GeminiAIService {
 
             if (response.statusCode() == 200) {
                 return extractTextFromResponse(response.body());
+            } else if (response.statusCode() == 503 || response.statusCode() == 429) {
+                log.warn("Gemini model {} returned HTTP {}: high demand/rate-limited, automatically failing over to next model...", cleanModel, response.statusCode());
             } else {
                 log.warn("Gemini model {} returned HTTP {}: {}", cleanModel, response.statusCode(), response.body());
             }
@@ -347,13 +380,14 @@ public class GeminiAIService {
 
             if (response.statusCode() == 200) {
                 return extractTextFromResponse(response.body());
+            } else if (response.statusCode() == 503 || response.statusCode() == 429) {
+                log.warn("Gemini chat model {} returned HTTP {}: high demand/rate-limited, automatically failing over to next model...", cleanModel, response.statusCode());
+            } else if (response.statusCode() == 400 && systemInstruction != null) {
+                // If model returns 400 because system_instruction isn't supported, retry with prepended prompt
+                String combinedPrompt = systemInstruction + "\n\nUser Question: " + question;
+                return invokeModel(cleanModel, combinedPrompt, activeKey);
             } else {
                 log.warn("Gemini chat model {} returned HTTP {}: {}", cleanModel, response.statusCode(), response.body());
-                // If model returns 400 because system_instruction isn't supported, retry with prepended prompt
-                if (response.statusCode() == 400 && systemInstruction != null) {
-                    String combinedPrompt = systemInstruction + "\n\nUser Question: " + question;
-                    return invokeModel(cleanModel, combinedPrompt, activeKey);
-                }
             }
         } catch (Exception e) {
             log.warn("Gemini chat model {} invocation failed: {}", cleanModel, e.getMessage());

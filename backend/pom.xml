@@ -10,10 +10,10 @@
         <relativePath/>
     </parent>
     <groupId>com.repomind</groupId>
-    <artifactId>repomind-backend</artifactId>
+    <artifactId>gitly-backend</artifactId>
     <version>1.0.0-SNAPSHOT</version>
-    <name>repomind-backend</name>
-    <description>RepoMind AI - AI-Powered Visual Repository Understanding Platform</description>
+    <name>gitly-backend</name>
+    <description>Gitly AI - AI-Powered Visual Repository Intelligence Platform</description>
 
     <properties>
         <java.version>17</java.version>

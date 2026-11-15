@@ -1,6 +1,6 @@
-# RepoMind AI — Setup & Run Guide
+# Gitly AI — Setup & Run Guide
 
-**RepoMind AI** is a lightweight, multi-language visual repository understanding platform. It requires zero external databases (PostgreSQL, MySQL, or Redis are not required).
+**Gitly AI** is a lightweight, multi-language visual repository intelligence platform. It requires zero external databases (PostgreSQL, MySQL, or Redis are not required).
 
 ---
 

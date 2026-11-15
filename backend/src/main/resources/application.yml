@@ -3,14 +3,21 @@ server:
 
 spring:
   application:
-    name: repomind-backend
+    name: gitly-backend
+
+gitly:
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-3.5-flash}
+  storage:
+    clone-dir: ${CLONE_DIR:${java.io.tmpdir}/gitly-repos}
 
 repomind:
   gemini:
     api-key: ${GEMINI_API_KEY:}
-    model: ${GEMINI_MODEL:gemini-3.8-flash}
+    model: ${GEMINI_MODEL:gemini-3.5-flash}
   storage:
-    clone-dir: ${CLONE_DIR:${java.io.tmpdir}/repomind-repos}
+    clone-dir: ${CLONE_DIR:${java.io.tmpdir}/gitly-repos}
 
 springdoc:
   api-docs:

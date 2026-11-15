@@ -3,10 +3,10 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: repomind-backend
+    container_name: gitly-backend
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
     ports:
       - "8080:8080"
     healthcheck:
@@ -19,7 +19,7 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    container_name: repomind-frontend
+    container_name: gitly-frontend
     ports:
       - "3000:3000"
     depends_on:
