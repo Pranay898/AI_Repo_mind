@@ -465,7 +465,6 @@ public class RepositoryUnderstandingService {
 
         return sb.toString();
     }
-    }
 
     private String getFileContent(Path rootPath, Map<String, String> fileContents, String relPath) {
         if (fileContents != null && fileContents.containsKey(relPath)) {
