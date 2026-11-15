@@ -118,6 +118,6 @@ public class RepositoryController {
     public ResponseEntity<Map<String, Object>> chat(
             @PathVariable String repositoryId,
             @Valid @RequestBody ChatRequest request) {
-        return ResponseEntity.ok(understandingService.answerChatQuestion(repositoryId, request.getQuestion()));
+        return ResponseEntity.ok(understandingService.answerChatQuestion(repositoryId, request));
     }
 }

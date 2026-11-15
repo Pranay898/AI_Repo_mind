@@ -2,6 +2,7 @@ package com.repomind.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.repomind.dto.ChatRequest;
 import com.repomind.dto.RepositoryAnalysisResult;
 import com.repomind.dto.RepositoryAnalysisResult.*;
 import lombok.RequiredArgsConstructor;
@@ -152,12 +153,21 @@ public class RepositoryUnderstandingService {
     }
 
     public Map<String, Object> answerChatQuestion(String repoId, String question) {
+        return answerChatQuestion(repoId, ChatRequest.builder().question(question).build());
+    }
+
+    public Map<String, Object> answerChatQuestion(String repoId, ChatRequest request) {
         RepositoryAnalysisResult repo = getAnalysis(repoId);
         Path rootPath = repoPathStore.get(repoId);
         Map<String, String> fileContents = repoFileContentsStore.getOrDefault(repoId, Map.of());
 
-        String qClean = question == null ? "" : question.trim();
+        String qClean = request.getQuestion() == null ? "" : request.getQuestion().trim();
         String qLower = qClean.toLowerCase();
+
+        // Update runtime API key if passed in request
+        if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
+            geminiService.setRuntimeApiKey(request.getApiKey());
+        }
 
         // Extract meaningful search tokens from the user's question
         List<String> queryTokens = Arrays.stream(qLower.split("[^a-z0-9_./-]+"))
@@ -169,7 +179,7 @@ public class RepositoryUnderstandingService {
         List<ComponentItem> rankedComponents = rankComponentsForQuestion(repo, fileContents, qLower, queryTokens);
 
         List<String> matchedFiles = rankedComponents.stream()
-                .limit(5)
+                .limit(6)
                 .map(ComponentItem::getFilePath)
                 .collect(Collectors.toCollection(ArrayList::new));
 
@@ -181,39 +191,57 @@ public class RepositoryUnderstandingService {
         for (String filePath : matchedFiles) {
             String content = getFileContent(rootPath, fileContents, filePath);
             if (content != null && !content.isBlank()) {
-                String excerpt = extractRelevantCodeSnippet(content, queryTokens, 1600);
+                String excerpt = extractRelevantCodeSnippet(content, queryTokens, 1800);
                 codeSnippets.append("\n--- File: ").append(filePath).append(" ---\n")
                         .append(excerpt).append("\n");
             }
         }
 
         List<String> agentThoughts = new ArrayList<>();
-        agentThoughts.add("Parsed question intent & extracted search tokens: " + (queryTokens.isEmpty() ? "[general overview]" : queryTokens));
-        agentThoughts.add("Scanned " + repo.getComponents().size() + " modules and " + repo.getApis().size() + " functions/endpoints in " + repo.getRepositoryName());
-        agentThoughts.add("Ranked top matching source files: " + matchedFiles);
+        agentThoughts.add("Analyzed question: \"" + qClean + "\"");
+        agentThoughts.add("Extracted core search tokens: " + (queryTokens.isEmpty() ? "[codebase overview]" : queryTokens));
+        agentThoughts.add("Scanned " + repo.getComponents().size() + " components and " + repo.getApis().size() + " endpoints in " + repo.getRepositoryName());
+        agentThoughts.add("Gathered source code excerpts from: " + matchedFiles);
 
-        String prompt = "You are RepoMind AI, an expert, friendly ChatGPT-style Senior Software Architect and Codebase Agent.\n"
-                + "You are answering a developer's question about the GitHub repository: " + repo.getRepositoryName() + "\n"
-                + "Primary Language & Stack: " + repo.getLanguageDistribution() + " | Frameworks: " + repo.getDetectedFrameworks() + "\n"
-                + "Database & Storage: " + repo.getDatabaseInfo().getDatabaseTechnology() + " | Models/Collections: " + repo.getDatabaseInfo().getDetectedModels() + "\n"
-                + "Project Overview: " + repo.getOverview().getPurpose() + "\n"
-                + "Top Matching Components for this Question:\n"
-                + rankedComponents.stream().limit(8).map(c -> "- " + c.getFilePath() + " (" + c.getCategory() + "): " + c.getResponsibility() + " | Imports: " + c.getRelatedComponents()).collect(Collectors.joining("\n")) + "\n"
-                + "Discovered Functions/APIs/Views:\n"
-                + repo.getApis().stream().limit(20).map(a -> "- [" + a.getMethod() + "] " + a.getPath() + " in " + a.getFilePath() + ": " + a.getDescription()).collect(Collectors.joining("\n")) + "\n"
-                + (codeSnippets.length() > 0 ? "\nActual Source Code from Matching Repository Files:\n" + codeSnippets : "")
-                + "\nDeveloper Question: \"" + qClean + "\"\n\n"
-                + "Instructions:\n"
-                + "1. Answer the exact question directly, naturally, and conversationally like ChatGPT.\n"
-                + "2. Cite exact file paths, function names, and variables from the source code above.\n"
-                + "3. Include short, relevant code snippets or flow steps from the actual repository to prove how it works.\n"
-                + "4. Never give a generic response—tailor every paragraph specifically to \"" + qClean + "\".";
+        String systemPrompt = "You are RepoMind AI, an expert Senior Software Engineer, Principal Architect, and Codebase Intelligence Assistant (operating just like ChatGPT).\n"
+                + "You are helping a software engineer deeply understand this GitHub repository: " + repo.getRepositoryName() + ".\n\n"
+                + "CODEBASE PROFILE:\n"
+                + "- Primary Languages: " + repo.getLanguageDistribution() + "\n"
+                + "- Frameworks & Tools: " + (repo.getDetectedFrameworks().isEmpty() ? "Standard" : String.join(", ", repo.getDetectedFrameworks())) + "\n"
+                + "- Database & Storage: " + repo.getDatabaseInfo().getDatabaseTechnology() + " | Models: " + repo.getDatabaseInfo().getDetectedModels() + "\n"
+                + "- Project Overview: " + repo.getOverview().getPurpose() + "\n"
+                + "- High-level Architecture: " + repo.getArchitecture().getExplanation() + "\n\n"
+                + "RELEVANT MODULES & COMPONENTS:\n"
+                + rankedComponents.stream().limit(8).map(c -> "- " + c.getFilePath() + " (" + c.getCategory() + "): " + c.getResponsibility()).collect(Collectors.joining("\n")) + "\n\n"
+                + "RELEVANT FUNCTIONS & APIS IN CODEBASE:\n"
+                + repo.getApis().stream().limit(15).map(a -> "- [" + a.getMethod() + "] " + a.getPath() + " (" + a.getFilePath() + "): " + a.getDescription()).collect(Collectors.joining("\n")) + "\n"
+                + (codeSnippets.length() > 0 ? "\nACTUAL SOURCE CODE SNIPPETS FROM REPOSITORY:\n" + codeSnippets : "") + "\n\n"
+                + "RESPONSE INSTRUCTIONS:\n"
+                + "1. Answer the user's specific question directly, thoroughly, and conversationally in ChatGPT's style.\n"
+                + "2. Reference actual file names, function names, classes, and logic from this repository.\n"
+                + "3. When describing how something works, break down the step-by-step execution flow with clear explanations.\n"
+                + "4. Use GitHub-Flavored Markdown: clean code blocks with syntax highlighting, bullet points, and bold text.\n"
+                + "5. If the question asks about a feature or file not in this repository, explain what exists instead in this repository.\n"
+                + "6. Do not include raw HTML or weird punctuation formatting.";
 
-        String aiAnswer = geminiService.generateText(prompt);
+        List<Map<String, String>> historyList = new ArrayList<>();
+        if (request.getHistory() != null) {
+            for (ChatRequest.HistoryItem h : request.getHistory()) {
+                if (h.getText() != null && !h.getText().isBlank()) {
+                    historyList.add(Map.of("role", h.getRole(), "text", h.getText()));
+                }
+            }
+        }
+
+        String aiAnswer = geminiService.generateChat(systemPrompt, historyList, qClean, request.getApiKey());
+        String engineModel;
+
         if (aiAnswer != null && !aiAnswer.isBlank()) {
+            engineModel = "Google Gemini AI (Live)";
             agentThoughts.add("Generated live conversational response via Google Gemini AI model.");
         } else {
-            agentThoughts.add("Synthesized deep code-backed response using Local Codebase Reasoning Agent from actual source files.");
+            engineModel = "RepoMind Intelligent Reasoning Engine";
+            agentThoughts.add("Synthesized code-backed answer from repository source files and AST models.");
             aiAnswer = buildDynamicAgentAnswer(repo, rootPath, fileContents, qClean, qLower, queryTokens, rankedComponents, matchedFiles);
         }
 
@@ -222,7 +250,8 @@ public class RepositoryUnderstandingService {
                 "question", qClean,
                 "answer", aiAnswer,
                 "agentThoughts", agentThoughts,
-                "referencedFiles", matchedFiles
+                "referencedFiles", matchedFiles,
+                "engine", engineModel
         );
     }
 
@@ -312,191 +341,130 @@ public class RepositoryUnderstandingService {
 
         StringBuilder sb = new StringBuilder();
 
-        // 1. Check if user is asking about a specific file by name
+        // 1. Direct match on a specific file or class name
         ComponentItem directFileMatch = repo.getComponents().stream()
-                .filter(c -> qLower.contains(c.getName().toLowerCase())
-                        || (c.getName().replaceAll("\\.[a-z0-9]+$", "").length() > 3
-                        && qLower.contains(c.getName().replaceAll("\\.[a-z0-9]+$", "").toLowerCase())))
+                .filter(c -> {
+                    String baseName = c.getName().replaceAll("\\.[a-z0-9]+$", "").toLowerCase();
+                    return qLower.contains(c.getName().toLowerCase())
+                            || (baseName.length() >= 3 && qLower.contains(baseName))
+                            || qLower.contains(c.getFilePath().toLowerCase());
+                })
                 .findFirst()
                 .orElse(null);
 
         if (directFileMatch != null) {
             String content = getFileContent(rootPath, fileContents, directFileMatch.getFilePath());
-            sb.append("### Deep-Dive into `").append(directFileMatch.getFilePath()).append("`\n\n");
-            sb.append("- **Architectural Layer:** `").append(directFileMatch.getCategory()).append("`\n");
-            sb.append("- **Language:** ").append(directFileMatch.getLanguage()).append("\n");
-            sb.append("- **Core Responsibility:** ").append(directFileMatch.getResponsibility()).append("\n");
+            String lang = directFileMatch.getLanguage() != null ? directFileMatch.getLanguage().toLowerCase() : "code";
+            String codeBlockTag = lang.contains("python") ? "python" : (lang.contains("java") ? "java" : (lang.contains("type") || lang.contains("react") ? "typescript" : "javascript"));
+
+            sb.append("In **").append(repo.getRepositoryName()).append("**, `").append(directFileMatch.getFilePath()).append("` serves as a core **")
+                    .append(directFileMatch.getCategory()).append("** component.\n\n");
+            sb.append("### Overview of `").append(directFileMatch.getName()).append("`\n\n");
+            sb.append("- **Architectural Role:** ").append(directFileMatch.getResponsibility()).append("\n");
+            sb.append("- **Language & Runtime:** ").append(directFileMatch.getLanguage()).append("\n");
             if (!directFileMatch.getRelatedComponents().isEmpty()) {
-                sb.append("- **Imports / Dependencies:** `").append(String.join("`, `", directFileMatch.getRelatedComponents())).append("`\n");
+                sb.append("- **Dependencies & Imports:** `").append(String.join("`, `", directFileMatch.getRelatedComponents())).append("`\n");
             }
+
             List<ApiEndpointItem> fileFuncs = repo.getApis().stream()
                     .filter(a -> a.getFilePath().equals(directFileMatch.getFilePath()))
                     .toList();
             if (!fileFuncs.isEmpty()) {
-                sb.append("\n#### Functions, Views & Endpoints Defined in `").append(directFileMatch.getName()).append("`\n");
+                sb.append("\n#### Functions & Handlers in this File\n");
                 for (ApiEndpointItem fn : fileFuncs) {
                     sb.append("- **`").append(fn.getPath()).append("`** (*").append(fn.getMethod()).append("*): ").append(fn.getDescription()).append("\n");
                 }
             }
+
             if (content != null && !content.isBlank()) {
                 String snippet = extractRelevantCodeSnippet(content, queryTokens, 900);
-                sb.append("\n#### Key Source Code Excerpt (`").append(directFileMatch.getFilePath()).append("`)\n");
-                sb.append("```").append(directFileMatch.getLanguage().toLowerCase().contains("python") ? "python" : "typescript").append("\n");
+                sb.append("\n#### Code Implementation Walkthrough\n");
+                sb.append("```").append(codeBlockTag).append("\n");
                 sb.append(snippet.trim()).append("\n```\n");
             }
             return sb.toString();
         }
 
-        // 2. Check if user asks how to setup / run / install / start the project
+        // 2. Specific matching functions / endpoints in codebase
+        List<ApiEndpointItem> matchingApis = repo.getApis().stream()
+                .filter(a -> queryTokens.stream().anyMatch(t -> a.getPath().toLowerCase().contains(t) || a.getDescription().toLowerCase().contains(t)))
+                .limit(6)
+                .toList();
+
+        if (!matchingApis.isEmpty() && !qLower.matches(".*(how to run|setup|install|start|overview).*")) {
+            sb.append("In **").append(repo.getRepositoryName()).append("**, this functionality is implemented across the following functions and routes:\n\n");
+            for (ApiEndpointItem api : matchingApis) {
+                sb.append("### `").append(api.getPath()).append("` (*").append(api.getMethod()).append("*)\n");
+                sb.append("- **Defined in:** `").append(api.getFilePath()).append("`\n");
+                sb.append("- **Description:** ").append(api.getDescription()).append("\n");
+
+                String content = getFileContent(rootPath, fileContents, api.getFilePath());
+                if (content != null && !content.isBlank()) {
+                    String funcSnippet = extractRelevantCodeSnippet(content, List.of(api.getPath().toLowerCase()), 500);
+                    if (!funcSnippet.isBlank()) {
+                        sb.append("\n```\n").append(funcSnippet.trim()).append("\n```\n");
+                    }
+                }
+                sb.append("\n");
+            }
+            return sb.toString();
+        }
+
+        // 3. Setup / Local Run / Installation
         if (qLower.matches(".*(how to run|setup|install|start|build|deploy|environment|config|local).*")) {
             sb.append("### How to Set Up & Run `").append(repo.getRepositoryName()).append("` Locally\n\n");
-            sb.append("Based on my inspection of the repository manifests and entry points, here is the step-by-step setup guide:\n\n");
             sb.append("#### 1. Clone the Repository\n");
             sb.append("```bash\ngit clone ").append(repo.getRepositoryUrl()).append(".git\ncd ")
                     .append(repo.getRepositoryName().substring(repo.getRepositoryName().indexOf('/') + 1)).append("\n```\n\n");
 
             if (repo.getLanguageDistribution().containsKey("Python")) {
                 sb.append("#### 2. Install Python Dependencies\n");
-                sb.append("```bash\npip install -r requirements.txt\n```\n");
-                if (!repo.getDependencies().isEmpty()) {
-                    sb.append("Key packages installed: ")
-                            .append(repo.getDependencies().stream().limit(8).map(d -> "`" + d.getName() + "`").collect(Collectors.joining(", ")))
-                            .append(".\n\n");
-                }
-                sb.append("#### 3. Configure Credentials & Environment\n");
-                if (repo.getDatabaseInfo().getDatabaseTechnology().contains("Firebase")) {
-                    sb.append("- Ensure `firebase_credentials.json` is placed in the root folder (used by `db.py` / `auth.py` to connect to Firestore collections: ")
-                            .append(repo.getDatabaseInfo().getDetectedModels()).append(").\n");
-                }
-                sb.append("- Configure `GOOGLE_API_KEY` in `app.py` / `utils.py` for Gemini AI integration.\n\n");
-                sb.append("#### 4. Launch the Application\n");
+                sb.append("```bash\npip install -r requirements.txt\n```\n\n");
+                sb.append("#### 3. Run the Application\n");
                 if (repo.getDetectedFrameworks().contains("Streamlit")) {
                     sb.append("```bash\nstreamlit run app.py\n```\n");
                 } else {
                     sb.append("```bash\npython app.py\n```\n");
                 }
             } else if (repo.getLanguageDistribution().containsKey("Java")) {
-                sb.append("#### 2. Build & Run with Maven / Gradle\n");
+                sb.append("#### 2. Build & Run with Maven\n");
                 sb.append("```bash\n./mvnw spring-boot:run\n```\n");
             } else {
-                sb.append("#### 2. Install NPM Packages & Start Dev Server\n");
+                sb.append("#### 2. Install Packages & Start Dev Server\n");
                 sb.append("```bash\nnpm install\nnpm run dev\n```\n");
             }
             return sb.toString();
         }
 
-        // 3. Check if user asks about Authentication / Login / Users / Roles / OTP
-        if (qLower.matches(".*(auth|login|register|password|otp|role|admin|trainer|employee|permission|session).*")) {
-            sb.append("### Authentication, Roles & User Management in `").append(repo.getRepositoryName()).append("`\n\n");
-            List<ComponentItem> authComps = rankedComponents.stream().limit(3).toList();
-            for (ComponentItem comp : authComps) {
-                sb.append("#### Module: `").append(comp.getFilePath()).append("` (").append(comp.getCategory()).append(")\n");
-                sb.append("- **Responsibility:** ").append(comp.getResponsibility()).append("\n");
-                if (!comp.getRelatedComponents().isEmpty()) {
-                    sb.append("- **Dependencies:** `").append(String.join("`, `", comp.getRelatedComponents())).append("`\n");
-                }
+        // 4. General / Architectural / Custom Question Walkthrough
+        sb.append("### Codebase Analysis: ").append(question).append("\n\n");
+        sb.append("Based on the code analysis of **").append(repo.getRepositoryName()).append("**:\n\n");
+
+        if (!rankedComponents.isEmpty()) {
+            sb.append("#### Primary Responsible Modules\n");
+            for (ComponentItem comp : rankedComponents.stream().limit(3).toList()) {
+                String lang = comp.getLanguage() != null ? comp.getLanguage().toLowerCase() : "code";
+                String codeBlockTag = lang.contains("python") ? "python" : (lang.contains("java") ? "java" : "typescript");
+
+                sb.append("- **`").append(comp.getFilePath()).append("`** (").append(comp.getCategory()).append("): ")
+                        .append(comp.getResponsibility()).append("\n");
+
                 String content = getFileContent(rootPath, fileContents, comp.getFilePath());
                 if (content != null && !content.isBlank()) {
-                    String snippet = extractRelevantCodeSnippet(content, List.of("login", "register", "otp", "role", "admin", "trainer", "auth", "user"), 700);
-                    sb.append("\n```python\n").append(snippet.trim()).append("\n```\n\n");
-                }
-            }
-            return sb.toString();
-        }
-
-        // 4. Check if user asks about Database / Collections / Models / Data Storage
-        if (qLower.matches(".*(database|db|firestore|firebase|collection|table|model|schema|persist|storage|store).*")) {
-            DatabaseInfo db = repo.getDatabaseInfo();
-            sb.append("### Database & Persistence Architecture in `").append(repo.getRepositoryName()).append("`\n\n");
-            sb.append("- **Database:** ").append(db.getDatabaseTechnology()).append("\n");
-            sb.append("- **Data Flow:** ").append(db.getDataFlowSummary()).append("\n");
-            if (!db.getDetectedModels().isEmpty()) {
-                sb.append("\n#### Discovered Collections / Entities\n");
-                for (String model : db.getDetectedModels()) {
-                    sb.append("- `").append(model).append("`\n");
-                }
-            }
-            if (!db.getDataAccessFiles().isEmpty()) {
-                sb.append("\n#### Data Access Files\n");
-                for (String df : db.getDataAccessFiles()) {
-                    sb.append("- `").append(df).append("`\n");
-                    String content = getFileContent(rootPath, fileContents, df);
-                    if (content != null && !content.isBlank()) {
-                        sb.append("```\n").append(extractRelevantCodeSnippet(content, List.of("collection", "db", "table", "entity", "model", "find", "save"), 600).trim()).append("\n```\n");
+                    String snippet = extractRelevantCodeSnippet(content, queryTokens, 600);
+                    if (!snippet.isBlank()) {
+                        sb.append("\n```").append(codeBlockTag).append("\n").append(snippet.trim()).append("\n```\n\n");
                     }
                 }
             }
-            return sb.toString();
-        }
-
-        // 5. Check if user asks about Workflows / Execution Flow / Step-by-Step / Architecture
-        if (qLower.matches(".*(workflow|flow|step-by-step|step by step|how does.*work|execution|lifecycle|communicate|architecture).*")) {
-            sb.append("### End-to-End Execution Flow of `").append(repo.getRepositoryName()).append("`\n\n");
-            sb.append(repo.getArchitecture().getExplanation()).append("\n\n");
-
-            for (WorkflowDiagram wf : repo.getWorkflows()) {
-                sb.append("#### ").append(wf.getTitle()).append("\n");
-                sb.append(wf.getDescription()).append("\n\n");
-                for (String step : wf.getSteps()) {
-                    sb.append("- ").append(step).append("\n");
-                }
-                sb.append("\n");
-            }
-
-            sb.append("#### Architectural Layers\n");
-            for (ArchitectureLayer layer : repo.getArchitecture().getLayers()) {
-                sb.append("- **").append(layer.getName()).append("**: ").append(layer.getResponsibility())
-                        .append(" (`").append(String.join("`, `", layer.getRelatedFiles())).append("`)\n");
-            }
-            return sb.toString();
-        }
-
-        // 6. Check if user asks for Beginner / Fresher Overview ("what does this repo do in simple terms")
-        if (qLower.matches(".*(fresher|beginner|simple terms|overview|what is this|what does this|summary|purpose).*")) {
-            sb.append("### Overview of `").append(repo.getRepositoryName()).append("`\n\n");
-            sb.append("#### Project Purpose\n");
+        } else {
             sb.append(repo.getOverview().getPurpose()).append("\n\n");
-            sb.append("#### Core Features\n");
-            sb.append(repo.getOverview().getBusinessFunctionality()).append("\n\n");
-            sb.append("#### Technology Stack\n");
-            sb.append("- **Languages:** ").append(repo.getLanguageDistribution().entrySet().stream().map(e -> e.getKey() + " (" + e.getValue() + " files)").collect(Collectors.joining(", "))).append("\n");
-            sb.append("- **Frameworks:** ").append(repo.getDetectedFrameworks().isEmpty() ? "Standard runtime" : String.join(", ", repo.getDetectedFrameworks())).append("\n");
-            sb.append("- **Data Layer:** ").append(repo.getDatabaseInfo().getDatabaseTechnology()).append("\n\n");
-            sb.append("#### Important Files to Review\n");
-            for (ComponentItem c : repo.getComponents().stream().limit(6).toList()) {
-                sb.append("- `").append(c.getFilePath()).append("` (").append(c.getCategory()).append("): ").append(c.getResponsibility()).append("\n");
-            }
-            return sb.toString();
-        }
-
-        // 7. Specific Keyword / Code Search Answer for ANY custom question!
-        sb.append("### Codebase Analysis for: \"").append(question).append("\"\n\n");
-        sb.append("Scanned ").append(repo.getTotalFiles()).append(" files in `").append(repo.getRepositoryName()).append("`:\n\n");
-
-        List<ComponentItem> topMatches = rankedComponents.stream().limit(4).toList();
-        for (ComponentItem comp : topMatches) {
-            sb.append("#### `").append(comp.getFilePath()).append("` (").append(comp.getCategory()).append(")\n");
-            sb.append("- **Role:** ").append(comp.getResponsibility()).append("\n");
-            if (!comp.getRelatedComponents().isEmpty()) {
-                sb.append("- **Dependencies:** `").append(String.join("`, `", comp.getRelatedComponents())).append("`\n");
-            }
-            List<ApiEndpointItem> matchingApis = repo.getApis().stream()
-                    .filter(a -> a.getFilePath().equals(comp.getFilePath()))
-                    .limit(5)
-                    .toList();
-            if (!matchingApis.isEmpty()) {
-                sb.append("- **Functions/Routes:** ")
-                        .append(matchingApis.stream().map(a -> "`" + a.getPath() + "`").collect(Collectors.joining(", ")))
-                        .append("\n");
-            }
-            String content = getFileContent(rootPath, fileContents, comp.getFilePath());
-            if (content != null && !content.isBlank()) {
-                String snippet = extractRelevantCodeSnippet(content, queryTokens, 650);
-                sb.append("\n```\n").append(snippet.trim()).append("\n```\n\n");
-            }
+            sb.append("#### Architecture Breakdown\n");
+            sb.append(repo.getArchitecture().getExplanation()).append("\n");
         }
 
         return sb.toString();
+    }
     }
 
     private String getFileContent(Path rootPath, Map<String, String> fileContents, String relPath) {

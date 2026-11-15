@@ -17,7 +17,6 @@ import {
   ChevronDown,
   FileCode,
   Folder,
-  CheckCircle2,
   AlertCircle,
   Sun,
   Moon,
@@ -31,16 +30,18 @@ import {
   User as UserIcon,
   KeyRound,
   Terminal,
-  ArrowRight,
   Layers,
-  Code
+  Code,
+  Sparkles,
+  RotateCcw,
+  Zap
 } from 'lucide-react';
 
 mermaid.initialize({
   startOnLoad: false,
   theme: 'dark',
   securityLevel: 'loose',
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+  fontFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 });
 
 const API_BASE = (((import.meta as any).env?.VITE_API_BASE_URL as string) || '').replace(/\/+$/, '');
@@ -65,21 +66,17 @@ function stripHtml(text: string): string {
 
 /**
  * Parses inline markdown: bold, italic, code pills, and arrows.
- * Guarantees zero raw '*', '`', or '>' characters remain in the rendered output.
  */
 function renderInlineText(raw: string, isDark: boolean): React.ReactNode[] {
   if (!raw) return [];
 
-  // Pre-clean: strip HTML tags and arrows
   let text = raw
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?\/?>/g, ' ')
     .replace(/\s*-->\s*/g, ' → ')
     .replace(/\s*->\s*/g, ' → ');
 
-  // Tokenize by code: `code`
   const codeParts = text.split(/(`[^`]+`)/g);
-
   const nodes: React.ReactNode[] = [];
   let keyIndex = 0;
 
@@ -91,8 +88,8 @@ function renderInlineText(raw: string, isDark: boolean): React.ReactNode[] {
           key={`code-${keyIndex++}`}
           className={`px-1.5 py-0.5 mx-0.5 rounded text-[11px] font-mono font-medium border ${
             isDark
-              ? 'bg-slate-800 text-sky-300 border-slate-700'
-              : 'bg-slate-100 text-slate-800 border-slate-300'
+              ? 'bg-[#151C2C] text-emerald-300 border-emerald-500/20'
+              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
           }`}
         >
           {codeVal}
@@ -101,7 +98,6 @@ function renderInlineText(raw: string, isDark: boolean): React.ReactNode[] {
       continue;
     }
 
-    // Process bold (**bold**) and italic (*italic*) inside non-code text
     const boldParts = part.split(/(\*\*[^*]+\*\*|__[^_]+__)/g);
 
     for (const bPart of boldParts) {
@@ -115,7 +111,6 @@ function renderInlineText(raw: string, isDark: boolean): React.ReactNode[] {
         continue;
       }
 
-      // Check italic (*italic* or _italic_)
       const italicParts = bPart.split(/(?:^|[^\w])(\*[^*]+\*|_[^_]+_)(?:$|[^\w])/g);
 
       for (const iPart of italicParts) {
@@ -130,7 +125,6 @@ function renderInlineText(raw: string, isDark: boolean): React.ReactNode[] {
           continue;
         }
 
-        // Plain text: strip any stray markdown markers like solitary * or >
         const cleanedPlain = iPart
           .replace(/[*_`>#]/g, '')
           .replace(/&gt;/g, '>')
@@ -147,15 +141,13 @@ function renderInlineText(raw: string, isDark: boolean): React.ReactNode[] {
 }
 
 /**
- * Clean, Anti-Slop Markdown & Code Block Renderer.
- * Eliminates all raw *, #, >, `, and HTML tags and outputs clean technical prose.
+ * Modern ChatGPT-style Markdown & Code Block Viewer.
  */
 function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: boolean }) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   if (!content) return null;
 
-  // Split content by fenced code blocks: ```lang ... ```
   const blocks = content.split(/(```[\s\S]*?```)/g);
 
   const handleCopy = (code: string, idx: number) => {
@@ -178,31 +170,31 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
           return (
             <div
               key={blockIdx}
-              className={`rounded-lg overflow-hidden border my-2 font-mono text-xs ${
-                isDark ? 'border-slate-800 bg-[#0d1117]' : 'border-slate-300 bg-slate-50'
+              className={`rounded-xl overflow-hidden border my-3 font-mono text-xs shadow-lg ${
+                isDark ? 'border-white/[0.08] bg-[#080B11]' : 'border-slate-200 bg-slate-900 text-slate-100'
               }`}
             >
               <div
-                className={`px-3 py-1.5 border-b flex items-center justify-between text-[11px] ${
-                  isDark ? 'border-slate-800 bg-slate-900/90 text-slate-400' : 'border-slate-200 bg-slate-100 text-slate-600'
+                className={`px-3.5 py-2 border-b flex items-center justify-between text-[11px] ${
+                  isDark ? 'border-white/[0.06] bg-[#0E131E] text-slate-400' : 'border-slate-800 bg-slate-800 text-slate-400'
                 }`}
               >
                 <div className="flex items-center space-x-2">
-                  <Terminal className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="font-semibold uppercase tracking-wider">{language}</span>
+                  <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="font-semibold uppercase tracking-wider text-slate-300">{language}</span>
                 </div>
                 <button
                   onClick={() => handleCopy(codeString, blockIdx)}
-                  className={`px-2 py-0.5 rounded text-[10px] flex items-center space-x-1 border transition ${
+                  className={`px-2.5 py-1 rounded text-[11px] flex items-center space-x-1.5 border transition ${
                     isDark
-                      ? 'border-slate-700 hover:bg-slate-800 text-slate-300'
-                      : 'border-slate-300 hover:bg-slate-200 text-slate-700'
+                      ? 'border-white/[0.08] hover:bg-white/[0.06] text-slate-300'
+                      : 'border-slate-700 hover:bg-slate-700 text-slate-200'
                   }`}
                 >
                   {copiedIndex === blockIdx ? (
                     <>
                       <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
+                      <span className="text-emerald-400 font-medium">Copied!</span>
                     </>
                   ) : (
                     <>
@@ -212,14 +204,14 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
                   )}
                 </button>
               </div>
-              <pre className={`p-3 overflow-x-auto leading-relaxed ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+              <pre className="p-3.5 overflow-x-auto leading-relaxed text-slate-200 selection:bg-emerald-500/30">
                 {codeString}
               </pre>
             </div>
           );
         }
 
-        // Standard prose and list lines
+        // Prose lines
         const lines = block.split(/\r?\n/);
         return (
           <div key={blockIdx} className="space-y-2">
@@ -227,20 +219,20 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
               const trimmed = rawLine.trim();
               if (!trimmed) return null;
 
-              // Headings: #, ##, ###, ####
+              // Headings
               const headMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
               if (headMatch) {
                 const level = headMatch[1].length;
                 const titleText = headMatch[2].replace(/[#*`]/g, '').trim();
                 return (
-                  <div key={lIdx} className="pt-2 pb-1">
+                  <div key={lIdx} className="pt-2 pb-0.5">
                     <div
                       className={`font-semibold tracking-tight ${
-                        level <= 2
-                          ? 'text-sm text-sky-400 border-b border-slate-800 pb-1'
-                          : level === 3
-                          ? 'text-xs uppercase tracking-wider font-bold text-slate-300'
-                          : 'text-xs font-semibold text-slate-400'
+                        level === 1
+                          ? 'text-base text-white border-b border-white/[0.08] pb-1'
+                          : level === 2
+                          ? 'text-sm text-emerald-400'
+                          : 'text-xs uppercase tracking-wider font-bold text-slate-300'
                       }`}
                     >
                       {titleText}
@@ -249,14 +241,14 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
                 );
               }
 
-              // Blockquote: > quote
+              // Blockquote
               if (trimmed.startsWith('>')) {
                 const quoteText = trimmed.replace(/^>+\s*/, '');
                 return (
                   <div
                     key={lIdx}
-                    className={`pl-3 py-1 my-1 border-l-2 text-xs italic ${
-                      isDark ? 'border-sky-500 bg-sky-500/5 text-slate-300' : 'border-sky-600 bg-sky-50 text-slate-700'
+                    className={`pl-3 py-1.5 my-1.5 border-l-2 text-xs italic rounded-r ${
+                      isDark ? 'border-emerald-500 bg-emerald-500/5 text-slate-300' : 'border-emerald-600 bg-emerald-50 text-slate-700'
                     }`}
                   >
                     {renderInlineText(quoteText, isDark)}
@@ -264,32 +256,32 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
                 );
               }
 
-              // Unordered List: - or * or •
+              // Unordered List
               const bulletMatch = trimmed.match(/^([-*•])\s+(.+)$/);
               if (bulletMatch) {
                 return (
                   <div key={lIdx} className="flex items-start space-x-2 pl-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 mt-1.5 shrink-0" />
-                    <div className="text-xs leading-relaxed flex-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                    <div className="text-xs leading-relaxed flex-1 text-slate-300">
                       {renderInlineText(bulletMatch[2], isDark)}
                     </div>
                   </div>
                 );
               }
 
-              // Numbered List: 1. or 2.
+              // Numbered List
               const numMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
               if (numMatch) {
                 return (
                   <div key={lIdx} className="flex items-start space-x-2 pl-1">
                     <span
                       className={`w-4 h-4 rounded text-[10px] font-mono font-bold flex items-center justify-center shrink-0 mt-0.5 ${
-                        isDark ? 'bg-slate-800 text-sky-300' : 'bg-slate-200 text-slate-700'
+                        isDark ? 'bg-[#151C2C] text-emerald-400 border border-emerald-500/20' : 'bg-slate-200 text-slate-700'
                       }`}
                     >
                       {numMatch[1]}
                     </span>
-                    <div className="text-xs leading-relaxed flex-1">
+                    <div className="text-xs leading-relaxed flex-1 text-slate-300">
                       {renderInlineText(numMatch[2], isDark)}
                     </div>
                   </div>
@@ -298,7 +290,7 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
 
               // Standard Paragraph
               return (
-                <p key={lIdx} className="text-xs leading-relaxed">
+                <p key={lIdx} className="text-xs leading-relaxed text-slate-300">
                   {renderInlineText(trimmed, isDark)}
                 </p>
               );
@@ -311,33 +303,28 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
 }
 
 /**
- * Live Visual Mermaid SVG Canvas
+ * Interactive Mermaid Architecture Diagram Viewer.
  */
-function MermaidCanvas({ chart, title }: { chart: string; title?: string }) {
+function MermaidChart({ chart, title }: { chart: string; title?: string }) {
   const [svgContent, setSvgContent] = useState<string>('');
   const [zoom, setZoom] = useState<number>(1);
-  const [showRaw, setShowRaw] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
+  const [showRaw, setShowRaw] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!chart) return;
     let isMounted = true;
-    setSvgContent('');
     const renderDiagram = async () => {
+      if (!chart || !chart.trim()) return;
       try {
-        const uniqueId = 'mermaid-svg-' + Math.random().toString(36).substring(2, 9);
-        const { svg } = await mermaid.render(uniqueId, chart);
-        if (isMounted) {
-          setSvgContent(svg);
-        }
+        const id = 'mermaid-svg-' + Math.random().toString(36).substring(2, 9);
+        const { svg } = await mermaid.render(id, chart);
+        if (isMounted) setSvgContent(svg);
       } catch (err) {
-        console.warn('Mermaid rendering notice:', err);
+        console.error('Mermaid render error:', err);
       }
     };
     renderDiagram();
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [chart]);
 
   const handleCopy = () => {
@@ -347,62 +334,62 @@ function MermaidCanvas({ chart, title }: { chart: string; title?: string }) {
   };
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-[#0b0f17] overflow-hidden">
-      <div className="px-4 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span className="text-xs font-semibold text-slate-200 font-mono">
-            {title || 'Architecture Topology'}
+    <div className="rounded-2xl border border-white/[0.08] overflow-hidden bg-[#0A0D14] shadow-2xl">
+      <div className="px-4 py-3 border-b border-white/[0.08] bg-[#0E131E] flex items-center justify-between">
+        <div className="flex items-center space-x-2.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-xs font-semibold text-slate-200 font-mono tracking-tight">
+            {title || 'Repository Architecture Topology'}
           </span>
         </div>
 
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-1.5">
           <button
-            onClick={() => setZoom(z => Math.max(0.5, z - 0.15))}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-300 text-xs transition"
+            onClick={() => setZoom(z => Math.max(0.4, z - 0.15))}
+            className="p-1.5 rounded-lg hover:bg-white/[0.08] text-slate-300 transition"
             title="Zoom Out"
           >
-            <ZoomOut className="w-3.5 h-3.5" />
+            <ZoomOut className="w-4 h-4" />
           </button>
-          <span className="text-[11px] font-mono text-slate-400 px-1.5">
+          <span className="text-[11px] font-mono text-slate-400 px-1">
             {Math.round(zoom * 100)}%
           </span>
           <button
-            onClick={() => setZoom(z => Math.min(2.2, z + 0.15))}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-300 text-xs transition"
+            onClick={() => setZoom(z => Math.min(2.5, z + 0.15))}
+            className="p-1.5 rounded-lg hover:bg-white/[0.08] text-slate-300 transition"
             title="Zoom In"
           >
-            <ZoomIn className="w-3.5 h-3.5" />
+            <ZoomIn className="w-4 h-4" />
           </button>
           <button
             onClick={() => setZoom(1)}
-            className="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-400 text-[10px] font-mono transition"
+            className="px-2.5 py-1 rounded-lg hover:bg-white/[0.08] text-slate-400 text-[11px] font-mono transition"
           >
             Reset
           </button>
-          <div className="h-3 w-px bg-slate-800 mx-1" />
+          <div className="h-4 w-px bg-white/[0.08] mx-1" />
           <button
             onClick={() => setShowRaw(!showRaw)}
-            className="px-2 py-0.5 rounded text-[10px] font-mono text-slate-300 hover:bg-slate-800 transition"
+            className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-slate-300 hover:bg-white/[0.08] transition"
           >
-            {showRaw ? 'Diagram' : 'Source'}
+            {showRaw ? 'Visual Diagram' : 'Mermaid Source'}
           </button>
           <button
             onClick={handleCopy}
-            className="px-2 py-0.5 rounded text-[10px] font-mono text-slate-300 hover:bg-slate-800 flex items-center space-x-1 transition"
+            className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-slate-300 hover:bg-white/[0.08] flex items-center space-x-1.5 transition"
           >
-            {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span>{copied ? 'Copied' : 'Copy'}</span>
           </button>
         </div>
       </div>
 
       {showRaw ? (
-        <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto bg-[#080c14]">
+        <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto bg-[#07090E]">
           {chart}
         </pre>
       ) : (
-        <div className="p-6 overflow-auto flex items-center justify-center min-h-[360px] bg-[#070b12]">
+        <div className="p-8 overflow-auto flex items-center justify-center min-h-[420px] bg-[#07090E] bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]">
           {svgContent ? (
             <div
               style={{ transform: `scale(${zoom})`, transformOrigin: 'center center', transition: 'transform 0.15s ease' }}
@@ -410,8 +397,8 @@ function MermaidCanvas({ chart, title }: { chart: string; title?: string }) {
             />
           ) : (
             <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              <span>Generating diagram...</span>
+              <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+              <span>Generating architecture diagram...</span>
             </div>
           )}
         </div>
@@ -420,7 +407,9 @@ function MermaidCanvas({ chart, title }: { chart: string; title?: string }) {
   );
 }
 
-// Interactive Folder & File Tree Component
+/**
+ * Interactive File Tree Component
+ */
 function FileTreeItem({ node, onSelect, selectedPath, isDark }: { node: any; onSelect: (n: any) => void; selectedPath?: string; isDark: boolean }) {
   const [open, setOpen] = useState(false);
   const isDir = node.type === 'DIRECTORY';
@@ -433,30 +422,36 @@ function FileTreeItem({ node, onSelect, selectedPath, isDark }: { node: any; onS
           if (isDir) setOpen(!open);
           onSelect(node);
         }}
-        className={`flex items-center space-x-2 px-2 py-1 rounded cursor-pointer text-xs transition ${
+        className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-xs font-mono cursor-pointer transition select-none ${
           isSelected
-            ? 'bg-sky-600 text-white font-medium'
+            ? 'bg-emerald-500/15 text-emerald-400 font-medium'
             : isDark
-            ? 'hover:bg-slate-800 text-slate-300'
-            : 'hover:bg-slate-200 text-slate-700'
+            ? 'hover:bg-white/[0.04] text-slate-300'
+            : 'hover:bg-slate-100 text-slate-700'
         }`}
       >
         {isDir ? (
-          open ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+          <div className="flex items-center space-x-1 shrink-0">
+            {open ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+            <Folder className="w-3.5 h-3.5 text-amber-400" />
+          </div>
         ) : (
-          <span className="w-3.5" />
+          <FileCode className="w-3.5 h-3.5 text-slate-400 ml-4 shrink-0" />
         )}
-        {isDir ? (
-          <Folder className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-        ) : (
-          <FileCode className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-        )}
-        <span className="truncate font-mono">{node.name}</span>
+        <span className="truncate">{node.name}</span>
+        {node.sizeFormatted && <span className="text-[10px] text-slate-400 ml-auto shrink-0">{node.sizeFormatted}</span>}
       </div>
+
       {isDir && open && node.children && (
-        <div className="pl-3.5 border-l border-slate-800 ml-3 mt-0.5 space-y-0.5">
+        <div className="pl-4 ml-2 border-l border-white/[0.08] space-y-0.5 mt-0.5">
           {node.children.map((child: any, idx: number) => (
-            <FileTreeItem key={idx} node={child} onSelect={onSelect} selectedPath={selectedPath} isDark={isDark} />
+            <FileTreeItem
+              key={idx}
+              node={child}
+              onSelect={onSelect}
+              selectedPath={selectedPath}
+              isDark={isDark}
+            />
           ))}
         </div>
       )}
@@ -464,13 +459,13 @@ function FileTreeItem({ node, onSelect, selectedPath, isDark }: { node: any; onS
   );
 }
 
-export default function App() {
+export function App() {
   const [isDark, setIsDark] = useState(true);
-  const [repoUrl, setRepoUrl] = useState('https://github.com/pranay898/ai_automated_question_bulider-');
+  const [repoUrl, setRepoUrl] = useState('');
   const [branch, setBranch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<any>(null);
+  const [analysis, setAnalysis] = useState<any | null>(null);
 
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
@@ -480,22 +475,18 @@ export default function App() {
     'architecture' | 'chat' | 'overview' | 'explorer' | 'workflows' | 'components' | 'apis' | 'database' | 'dependencies' | 'onboarding'
   >('architecture');
 
-  const [selectedFileNode, setSelectedFileNode] = useState<any>(null);
+  const [selectedFileNode, setSelectedFileNode] = useState<any | null>(null);
   const [compSearch, setCompSearch] = useState('');
 
-  // ChatGPT-style Agent Chat State
+  // ChatGPT State
+  const [chatMessages, setChatMessages] = useState<
+    Array<{ role: 'user' | 'assistant'; text: string; thoughts?: string[]; files?: string[]; engine?: string }>
+  >([]);
   const [chatQuestion, setChatQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const [chatMessages, setChatMessages] = useState<
-    { role: 'user' | 'assistant'; text: string; thoughts?: string[]; files?: string[] }[]
-  >([
-    {
-      role: 'assistant',
-      text: 'Ask questions about files, architecture, database models, or workflows in the analyzed repository.'
-    }
-  ]);
 
+  // Check health and Gemini active status on load
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/repositories/health`)
       .then(r => r.json())
@@ -546,12 +537,21 @@ export default function App() {
       if (data.fileTree && data.fileTree.length > 0) {
         setSelectedFileNode(data.fileTree[0]);
       }
-      const sampleComps = (data.components || []).slice(0, 5).map((c: any) => '`' + c.filePath + '`').join(', ');
+      setActiveTab('architecture');
+      // Initialize first welcome message
       setChatMessages([
         {
           role: 'assistant',
-          thoughts: data.agentThinkingSteps || [],
-          text: `### Repository Analysis: ${data.repositoryName}\n\n- **Files:** ${data.totalFiles} files in ${data.totalDirectories} directories\n- **Languages:** ${Object.keys(data.languageDistribution || {}).join(', ')}\n- **Frameworks:** ${(data.detectedFrameworks || []).join(', ') || 'Standard'}\n- **Data Layer:** ${data.databaseInfo?.databaseTechnology || 'Application State'}\n- **Key Modules:** ${sampleComps}\n\nAsk any question about this codebase below.`
+          thoughts: data.agentThinkingSteps || [
+            `Scanned ${data.totalFiles} files across ${data.totalDirectories} directories`,
+            `Identified primary language: ${Object.keys(data.languageDistribution || {})[0] || 'Unknown'}`,
+            `Mapped architecture and components into visual topology`
+          ],
+          text: `Hello! I have analyzed **${data.repositoryName}**.\n\n`
+            + `- **Language Stack:** ${Object.keys(data.languageDistribution || {}).join(', ') || 'Multi-language'}\n`
+            + `- **Frameworks:** ${(data.detectedFrameworks || []).join(', ') || 'Standard'}\n`
+            + `- **Data Layer:** ${data.databaseInfo?.databaseTechnology || 'Application State'}\n\n`
+            + `You can ask me any question like in ChatGPT: file locations, execution flow, function logic, bugs, or how to run it locally.`
         }
       ]);
     } catch (err: any) {
@@ -564,15 +564,23 @@ export default function App() {
   const askQuestion = async (questionText: string) => {
     if (!questionText.trim() || !analysis) return;
 
-    setChatMessages(prev => [...prev, { role: 'user', text: questionText }]);
+    const userMsg = questionText.trim();
+    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setChatQuestion('');
     setChatLoading(true);
 
     try {
+      // Build conversation history to send to backend for multi-turn ChatGPT memory
+      const history = chatMessages.map(m => ({ role: m.role, text: m.text }));
+
       const res = await fetch(`${API_BASE}/api/v1/repositories/${analysis.repositoryId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: questionText })
+        body: JSON.stringify({
+          question: userMsg,
+          history: history.slice(-6),
+          apiKey: apiKeyInput.trim() || undefined
+        })
       });
       const data = await res.json();
       if (res.ok) {
@@ -582,17 +590,18 @@ export default function App() {
             role: 'assistant',
             text: data.answer,
             thoughts: data.agentThoughts,
-            files: data.referencedFiles
+            files: data.referencedFiles,
+            engine: data.engine
           }
         ]);
       } else {
         setChatMessages(prev => [
           ...prev,
-          { role: 'assistant', text: 'Error: ' + (data.message || 'Failed to get answer') }
+          { role: 'assistant', text: 'Error: ' + (data.message || 'Failed to get answer from AI service.') }
         ]);
       }
     } catch (err: any) {
-      setChatMessages(prev => [...prev, { role: 'assistant', text: 'Network connection failed.' }]);
+      setChatMessages(prev => [...prev, { role: 'assistant', text: 'Network connection failed. Please verify backend is running.' }]);
     } finally {
       setChatLoading(false);
     }
@@ -603,19 +612,17 @@ export default function App() {
     askQuestion(chatQuestion);
   };
 
-  const firstCompName = analysis?.components?.[0]?.name || 'main entry';
-  const secondCompName = analysis?.components?.[1]?.name || 'core service';
   const suggestedPrompts = [
-    `Explain the architecture and purpose of this project`,
-    `How does ${firstCompName} work and what does it call?`,
-    `How does ${secondCompName} handle its logic?`,
-    `What database or persistence layer is configured?`,
-    `How to run and test this repository locally?`
+    `Explain the project architecture and data flow`,
+    `Walk me through the main entrypoint file`,
+    `What database, tables, or collections are configured?`,
+    `How do I set up and run this codebase locally?`,
+    `What are the critical dependencies and external APIs?`
   ];
 
   const navTabs = [
     { id: 'architecture', label: 'Architecture', icon: Share2, count: null },
-    { id: 'chat', label: 'Codebase Chat', icon: MessageSquare, count: null },
+    { id: 'chat', label: 'Codebase ChatGPT', icon: MessageSquare, count: null },
     { id: 'overview', label: 'Overview', icon: Layers, count: null },
     { id: 'explorer', label: 'Files', icon: FolderTree, count: analysis?.totalFiles || null },
     { id: 'workflows', label: 'Workflows', icon: GitBranch, count: analysis?.workflows?.length || null },
@@ -635,33 +642,37 @@ export default function App() {
   );
 
   return (
-    <div className={`min-h-screen flex flex-col font-sans ${isDark ? 'bg-[#090d16] text-slate-200' : 'bg-white text-slate-800'}`}>
+    <div className={`min-h-screen flex flex-col font-sans ${isDark ? 'bg-[#07090E] text-slate-200' : 'bg-slate-50 text-slate-900'}`}>
       {/* Top Application Bar */}
-      <header className={`border-b px-4 py-2.5 flex items-center justify-between gap-4 sticky top-0 z-30 ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+      <header className={`border-b px-5 py-3 flex items-center justify-between gap-4 sticky top-0 z-30 backdrop-blur-xl ${
+        isDark ? 'bg-[#0A0D14]/90 border-white/[0.08]' : 'bg-white/90 border-slate-200 shadow-sm'
+      }`}>
+        {/* Brand Logo */}
         <div className="flex items-center space-x-3 shrink-0">
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center text-sky-400">
-              <Code className="w-4 h-4" />
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+            <Zap className="w-4 h-4 fill-white text-white" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-sm tracking-tight text-white">RepoMind</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">AI 2.0</span>
             </div>
-            <div>
-              <span className="font-semibold text-xs tracking-tight text-white">RepoMind</span>
-              <span className="ml-2 text-[10px] font-mono text-slate-400 border border-slate-700 px-1.5 py-0.5 rounded">v1.0</span>
-            </div>
+            <p className="text-[10px] text-slate-400 tracking-wide font-medium">Visual Codebase Intelligence</p>
           </div>
         </div>
 
-        {/* Input Form */}
+        {/* Repository Search & Action Bar */}
         <form onSubmit={handleAnalyze} className="flex-1 max-w-2xl flex items-center space-x-2">
           <div className="relative flex-1">
-            <FolderGit2 className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <FolderGit2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               required
               value={repoUrl}
               onChange={e => setRepoUrl(e.target.value)}
-              placeholder="github.com/owner/repository"
-              className={`w-full rounded-md pl-9 pr-3 py-1.5 text-xs font-mono border focus:outline-none focus:ring-1 focus:ring-sky-500 ${
-                isDark ? 'bg-[#090d16] border-slate-700 text-slate-200 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-800'
+              placeholder="Paste public GitHub repository URL (e.g. https://github.com/owner/repo)"
+              className={`w-full rounded-xl pl-9 pr-3 py-2 text-xs font-mono border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition ${
+                isDark ? 'bg-[#0E131E] border-white/[0.08] text-slate-100 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-800'
               }`}
             />
           </div>
@@ -669,243 +680,312 @@ export default function App() {
             type="text"
             value={branch}
             onChange={e => setBranch(e.target.value)}
-            placeholder="branch"
-            className={`w-24 rounded-md px-2.5 py-1.5 text-xs font-mono border focus:outline-none focus:ring-1 focus:ring-sky-500 ${
-              isDark ? 'bg-[#090d16] border-slate-700 text-slate-200 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-800'
+            placeholder="branch (opt)"
+            className={`w-28 rounded-xl px-3 py-2 text-xs font-mono border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition ${
+              isDark ? 'bg-[#0E131E] border-white/[0.08] text-slate-100 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-800'
             }`}
           />
           <button
             type="submit"
             disabled={loading}
-            className="bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-medium px-3.5 py-1.5 rounded-md transition flex items-center space-x-1.5 shrink-0"
+            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl transition shadow-lg shadow-emerald-500/20 flex items-center space-x-2 shrink-0 active:scale-95"
           >
-            {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-            <span>{loading ? 'Analyzing' : 'Analyze'}</span>
+            {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            <span>{loading ? 'Analyzing...' : 'Analyze'}</span>
           </button>
         </form>
 
+        {/* Global Controls */}
         <div className="flex items-center space-x-2 shrink-0">
           <button
             onClick={() => setShowKeyInput(!showKeyInput)}
-            className={`px-2.5 py-1 rounded text-xs font-mono border transition flex items-center space-x-1.5 ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-mono border transition flex items-center space-x-2 ${
               geminiActive
-                ? 'border-emerald-600/40 bg-emerald-500/10 text-emerald-400'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
                 : isDark
-                ? 'border-slate-700 hover:bg-slate-800 text-slate-300'
+                ? 'border-white/[0.08] hover:bg-white/[0.04] text-slate-400 hover:text-slate-200'
                 : 'border-slate-300 hover:bg-slate-100 text-slate-700'
             }`}
             title="Configure Gemini API Key"
           >
-            <KeyRound className="w-3 h-3" />
-            <span>{geminiActive ? 'API Key Active' : 'API Key'}</span>
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>{geminiActive ? 'Gemini AI Active' : 'Set Gemini Key'}</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${geminiActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
           </button>
 
           <button
             onClick={() => setIsDark(!isDark)}
-            className={`p-1.5 rounded border transition ${isDark ? 'border-slate-700 hover:bg-slate-800 text-slate-400' : 'border-slate-300 hover:bg-slate-100 text-slate-600'}`}
+            className={`p-2 rounded-xl border transition ${
+              isDark ? 'border-white/[0.08] hover:bg-white/[0.04] text-slate-400' : 'border-slate-300 hover:bg-slate-100 text-slate-600'
+            }`}
             title="Toggle Theme"
           >
-            {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            {isDark ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5" />}
           </button>
         </div>
       </header>
 
-      {/* API Key Drawer */}
+      {/* Gemini API Key Modal / Drawer */}
       {showKeyInput && (
-        <form onSubmit={handleSaveApiKey} className={`px-4 py-2 border-b flex items-center justify-between gap-3 text-xs ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-          <div className="text-slate-400 flex items-center space-x-2">
-            <KeyRound className="w-3.5 h-3.5 text-slate-400" />
-            <span>Optional: Paste Google Gemini API Key for online reasoning (saved in session):</span>
+        <form onSubmit={handleSaveApiKey} className={`px-5 py-2.5 border-b flex items-center justify-between gap-4 text-xs animate-in slide-in-from-top ${
+          isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-slate-100 border-slate-200'
+        }`}>
+          <div className="flex items-center space-x-2.5 text-slate-300">
+            <KeyRound className="w-4 h-4 text-emerald-400" />
+            <span><strong>Google Gemini API Key:</strong> Enter your key for online multi-turn reasoning:</span>
           </div>
-          <div className="flex items-center space-x-2 flex-1 max-w-sm">
+          <div className="flex items-center space-x-2 flex-1 max-w-md">
             <input
               type="password"
               value={apiKeyInput}
               onChange={e => setApiKeyInput(e.target.value)}
               placeholder="AIzaSy..."
-              className={`flex-1 rounded px-2.5 py-1 text-xs font-mono border ${isDark ? 'bg-[#090d16] border-slate-700 text-white' : 'bg-white border-slate-300'}`}
+              className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-mono border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+                isDark ? 'bg-[#07090E] border-white/[0.12] text-white' : 'bg-white border-slate-300'
+              }`}
             />
-            <button type="submit" className="px-3 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium">
-              Save
+            <button type="submit" className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition">
+              Connect Key
             </button>
           </div>
         </form>
       )}
 
-      {/* Error Banner */}
+      {/* Error Notification */}
       {error && (
-        <div className="px-4 py-2 bg-rose-500/10 border-b border-rose-500/20 text-rose-400 text-xs flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
+        <div className="px-5 py-3 bg-rose-500/10 border-b border-rose-500/20 text-rose-300 text-xs flex items-center space-x-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Empty State */}
+      {/* Hero Welcome Screen (When no repository is analyzed yet) */}
       {!analysis ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-          <div className="max-w-xl space-y-6">
-            <div className="w-12 h-12 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-sky-400">
-              <FolderGit2 className="w-6 h-6" />
+        <main className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-4xl mx-auto my-auto space-y-8">
+          <div className="space-y-4">
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 text-xs font-mono">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Next-Gen Visual Repository Intelligence</span>
             </div>
 
-            <div className="space-y-2">
-              <h2 className="text-xl font-semibold tracking-tight text-white">
-                Understand any repository visually
-              </h2>
-              <p className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-                Paste a public GitHub repository link to inspect architecture topologies, dependency flows, file relationships, and ask natural language questions.
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
+              Understand Any GitHub Repository <br />
+              <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
+                Visually & Interactively
+              </span>
+            </h1>
+
+            <p className="text-sm text-slate-400 max-w-xl mx-auto leading-relaxed">
+              Generate architecture topology diagrams, inspect multi-language AST components, trace workflows, and chat with an intelligent codebase ChatGPT.
+            </p>
+          </div>
+
+          {/* Feature Showcase Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full pt-4 text-left">
+            <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0E131E]/60 backdrop-blur-md space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <Share2 className="w-4 h-4" />
+              </div>
+              <h3 className="font-semibold text-sm text-white">Visual Architecture</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Automatic GitDiagram topology mapping layers, services, controllers, and data models.
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-              <span className="text-xs text-slate-500">Sample repositories:</span>
-              {[
-                'https://github.com/pranay898/ai_automated_question_bulider-',
-                'https://github.com/ayushiee/nextflix',
-                'https://github.com/spring-projects/spring-petclinic'
-              ].map(url => (
+            <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0E131E]/60 backdrop-blur-md space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                <MessageSquare className="w-4 h-4" />
+              </div>
+              <h3 className="font-semibold text-sm text-white">Codebase ChatGPT</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Multi-turn conversation powered by Gemini AI with live source code grounded references.
+              </p>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0E131E]/60 backdrop-blur-md space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                <GraduationCap className="w-4 h-4" />
+              </div>
+              <h3 className="font-semibold text-sm text-white">5-Day Onboarding</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Tailored ramp-up guides for newly joined developers without senior dependency.
+              </p>
+            </div>
+          </div>
+        </main>
+      ) : (
+        /* Repository Dashboard Screen */
+        <div className="flex-1 flex flex-col">
+          {/* Repository Meta Banner */}
+          <div className={`px-5 py-2.5 border-b flex items-center justify-between text-xs font-mono ${
+            isDark ? 'bg-[#0A0D14] border-white/[0.08]' : 'bg-slate-100 border-slate-200'
+          }`}>
+            <div className="flex items-center space-x-3">
+              <span className="font-bold text-white text-sm">{analysis.repositoryName}</span>
+              <span className="px-2 py-0.5 rounded bg-white/[0.06] text-slate-300 text-[11px] border border-white/[0.06]">
+                {analysis.branch || 'default'}
+              </span>
+              <span className="text-slate-400">•</span>
+              <span className="text-slate-400">{analysis.totalFiles} files</span>
+              <span className="text-slate-400">•</span>
+              <span className="text-emerald-400 font-semibold">{analysis.overview?.applicationType || 'Application'}</span>
+            </div>
+
+            <a
+              href={analysis.repositoryUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-slate-400 hover:text-white flex items-center space-x-1.5 transition"
+            >
+              <span>View on GitHub</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+
+          {/* Segmented Navigation Tabs */}
+          <div className={`px-5 border-b flex items-center space-x-1 overflow-x-auto ${
+            isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
+          }`}>
+            {navTabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
                 <button
-                  key={url}
-                  onClick={() => setRepoUrl(url)}
-                  className={`text-xs font-mono px-2.5 py-1 rounded border transition ${
-                    isDark ? 'bg-[#0d1117] border-slate-800 hover:border-slate-600 text-slate-300' : 'bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700'
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center space-x-2 py-3 px-3.5 text-xs font-medium border-b-2 transition whitespace-nowrap ${
+                    isActive
+                      ? 'border-emerald-400 text-emerald-400 font-semibold'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {url.replace('https://github.com/', '')}
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <span>{tab.label}</span>
+                  {tab.count !== null && (
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                      isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/[0.06] text-slate-400'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Repository Meta Banner & Tabs */}
-          <div className={`border-b px-4 py-2 flex flex-wrap items-center justify-between gap-3 ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-            <div className="flex items-center space-x-3 text-xs font-mono">
-              <a
-                href={analysis.repositoryUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="font-semibold text-white hover:text-sky-400 flex items-center space-x-1"
-              >
-                <span>{analysis.repositoryName}</span>
-                <ExternalLink className="w-3 h-3 text-slate-500" />
-              </a>
-              <span className="text-slate-600">/</span>
-              <span className="text-slate-400">{analysis.branch || 'main'}</span>
-              <span className="text-slate-600">•</span>
-              <span className="text-slate-400">{analysis.totalFiles} files</span>
-              <span className="text-slate-600">•</span>
-              <span className="text-emerald-400 font-sans text-[11px] flex items-center space-x-1">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>Indexed</span>
-              </span>
-            </div>
-
-            {/* Segmented Tab Navigation */}
-            <div className="flex items-center space-x-1 overflow-x-auto">
-              {navTabs.map(tab => {
-                const active = activeTab === tab.id;
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`px-2.5 py-1 rounded text-xs font-medium flex items-center space-x-1.5 transition ${
-                      active
-                        ? 'bg-slate-800 text-white font-semibold'
-                        : isDark
-                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{tab.label}</span>
-                    {tab.count !== null && (
-                      <span className="text-[10px] font-mono text-slate-500 ml-0.5">
-                        {tab.count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
 
-          {/* Main Tab Views */}
-          <main className="flex-1 overflow-y-auto p-4 max-w-7xl mx-auto w-full">
-            {/* 1. ARCHITECTURE TAB */}
+          {/* Active Tab Content Area */}
+          <div className="flex-1 p-5 overflow-auto">
+            {/* 1. ARCHITECTURE TOPOLOGY TAB */}
             {activeTab === 'architecture' && (
-              <div className="space-y-4">
-                <MermaidCanvas
-                  chart={analysis.architecture?.mermaidDiagram}
-                  title={`System Topology: ${analysis.repositoryName}`}
-                />
+              <div className="space-y-6 max-w-6xl mx-auto">
+                <MermaidChart chart={analysis.architecture?.mermaidChart} title={`${analysis.repositoryName} — Architecture Topology`} />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {(analysis.architecture?.layers || []).map((layer: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={`p-3.5 rounded-lg border ${
-                        isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2 mb-1.5">
-                        <span className="w-5 h-5 rounded bg-slate-800 text-sky-400 font-mono text-xs flex items-center justify-center font-bold">
-                          {idx + 1}
-                        </span>
-                        <h3 className="font-semibold text-xs text-slate-200">{layer.name}</h3>
-                      </div>
-                      <p className="text-xs text-slate-400 mb-2 leading-relaxed">
-                        {stripHtml(layer.responsibility)}
-                      </p>
-                      <div className="flex flex-wrap gap-1">
-                        {(layer.relatedFiles || []).map((f: string) => (
-                          <span
-                            key={f}
-                            className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
-                              isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
-                            }`}
-                          >
-                            {f}
-                          </span>
-                        ))}
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className={`p-5 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
+                    <h3 className="text-sm font-semibold text-white mb-2 flex items-center space-x-2">
+                      <Share2 className="w-4 h-4 text-emerald-400" />
+                      <span>Architecture Overview</span>
+                    </h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {stripHtml(analysis.architecture?.explanation || '')}
+                    </p>
+                  </div>
+
+                  <div className={`p-5 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
+                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center space-x-2">
+                      <Layers className="w-4 h-4 text-cyan-400" />
+                      <span>Architectural Layers ({analysis.architecture?.layers?.length || 0})</span>
+                    </h3>
+                    <div className="space-y-2">
+                      {(analysis.architecture?.layers || []).map((layer: any, idx: number) => (
+                        <div key={idx} className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.05] text-xs">
+                          <div className="font-semibold text-slate-200">{layer.name}</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">{layer.responsibility}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* 2. CHAT TAB */}
+            {/* 2. CHATGPT CODEBASE CHAT TAB */}
             {activeTab === 'chat' && (
-              <div className="flex flex-col h-[calc(100vh-160px)] max-w-3xl mx-auto">
-                <div className="flex-1 overflow-y-auto space-y-4 pr-1 pb-4">
+              <div className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-210px)]">
+                {/* Chat Header Bar */}
+                <div className={`px-4 py-2.5 rounded-t-2xl border-t border-x flex items-center justify-between ${
+                  isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-slate-100 border-slate-200'
+                }`}>
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                      <Bot className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-white flex items-center space-x-2">
+                        <span>RepoMind Codebase Assistant</span>
+                        <span className="flex items-center space-x-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.2 rounded-full border border-emerald-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>{geminiActive ? 'Gemini 1.5 Flash (Live)' : 'RepoMind Reasoning Engine'}</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setChatMessages([
+                        {
+                          role: 'assistant',
+                          text: `New conversation started for **${analysis.repositoryName}**. Ask any question about its code, functions, or architecture.`
+                        }
+                      ]);
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-white/[0.08] text-slate-400 hover:text-white text-xs flex items-center space-x-1 transition"
+                    title="Clear Conversation"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span className="text-[11px]">New Chat</span>
+                  </button>
+                </div>
+
+                {/* Message Scroll Area */}
+                <div className={`flex-1 overflow-y-auto p-5 border-x space-y-5 ${
+                  isDark ? 'bg-[#07090E] border-white/[0.08]' : 'bg-slate-50 border-slate-200'
+                }`}>
                   {chatMessages.map((m, idx) => (
-                    <div key={idx} className={`flex items-start space-x-2.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      key={idx}
+                      className={`flex items-start space-x-3.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
                       {m.role === 'assistant' && (
-                        <div className="w-7 h-7 rounded bg-slate-800 border border-slate-700 flex items-center justify-center text-sky-400 shrink-0 mt-0.5">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center text-white shrink-0 shadow-lg shadow-emerald-500/10">
                           <Bot className="w-4 h-4" />
                         </div>
                       )}
 
                       <div
-                        className={`rounded-lg p-3 text-xs leading-relaxed max-w-2xl border ${
+                        className={`rounded-2xl p-4 text-xs max-w-2xl leading-relaxed shadow-sm ${
                           m.role === 'user'
-                            ? 'bg-sky-600 border-sky-500 text-white rounded-br-none'
+                            ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-tr-none font-medium'
                             : isDark
-                            ? 'bg-[#0d1117] border-slate-800 text-slate-200 rounded-bl-none'
-                            : 'bg-slate-50 border-slate-200 text-slate-800 rounded-bl-none'
+                            ? 'bg-[#0E131E] border border-white/[0.08] text-slate-200 rounded-tl-none'
+                            : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                         }`}
                       >
+                        {/* Thinking Process Accordion (ChatGPT style) */}
                         {m.thoughts && m.thoughts.length > 0 && (
-                          <details className="mb-2.5 rounded bg-slate-900/80 border border-slate-800 px-2.5 py-1.5 text-slate-400">
-                            <summary className="text-[11px] font-mono font-medium text-slate-300 cursor-pointer">
-                              Analysis process ({m.thoughts.length} steps)
+                          <details className="mb-3 border-b border-white/[0.06] pb-2 text-[11px] group">
+                            <summary className="cursor-pointer text-slate-400 hover:text-emerald-400 font-mono flex items-center space-x-2 select-none">
+                              <Sparkles className="w-3 h-3 text-emerald-400" />
+                              <span>Thinking Process ({m.thoughts.length} steps)</span>
+                              <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90 ml-auto" />
                             </summary>
-                            <div className="mt-1.5 space-y-1 text-[11px] font-mono pl-2 border-l border-slate-700 text-slate-400">
-                              {m.thoughts.map((t, ti) => (
-                                <div key={ti}>• {stripHtml(t)}</div>
+                            <div className="mt-2 pl-3 border-l border-emerald-500/30 space-y-1 font-mono text-[11px] text-slate-400">
+                              {m.thoughts.map((t, i) => (
+                                <div key={i} className="flex items-center space-x-1.5">
+                                  <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  <span>{t}</span>
+                                </div>
                               ))}
                             </div>
                           </details>
@@ -914,23 +994,43 @@ export default function App() {
                         {m.role === 'assistant' ? (
                           <MarkdownViewer content={m.text} isDark={isDark} />
                         ) : (
-                          <div className="text-xs font-medium">{m.text}</div>
+                          <div className="text-xs">{m.text}</div>
                         )}
 
+                        {/* Referenced File Tags */}
                         {m.files && m.files.length > 0 && (
-                          <div className="mt-2.5 pt-2 border-t border-slate-800 flex flex-wrap items-center gap-1">
-                            <span className="text-[10px] text-slate-400">Referenced:</span>
+                          <div className="mt-3 pt-2.5 border-t border-white/[0.06] flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400 font-mono">Referenced:</span>
                             {m.files.map((f, i) => (
-                              <span key={i} className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+                              <button
+                                key={i}
+                                onClick={() => {
+                                  setActiveTab('explorer');
+                                  // Find node in fileTree
+                                  const findNode = (nodes: any[]): any => {
+                                    for (const n of nodes) {
+                                      if (n.path === f) return n;
+                                      if (n.children) {
+                                        const res = findNode(n.children);
+                                        if (res) return res;
+                                      }
+                                    }
+                                    return null;
+                                  };
+                                  const targetNode = findNode(analysis?.fileTree || []);
+                                  if (targetNode) setSelectedFileNode(targetNode);
+                                }}
+                                className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/[0.05] hover:bg-emerald-500/20 hover:text-emerald-300 text-slate-300 transition"
+                              >
                                 {f}
-                              </span>
+                              </button>
                             ))}
                           </div>
                         )}
                       </div>
 
                       {m.role === 'user' && (
-                        <div className="w-7 h-7 rounded bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0 mt-0.5">
+                        <div className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0">
                           <UserIcon className="w-4 h-4" />
                         </div>
                       )}
@@ -938,25 +1038,27 @@ export default function App() {
                   ))}
 
                   {chatLoading && (
-                    <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono py-2">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Searching repository index...</span>
+                    <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono py-2 pl-12">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      <span>RepoMind AI is thinking...</span>
                     </div>
                   )}
                   <div ref={chatEndRef} />
                 </div>
 
-                {/* Prompt suggestions */}
-                <div className="flex flex-wrap gap-1.5 py-2">
+                {/* Prompt Suggestions Bar */}
+                <div className={`px-4 py-2 border-x flex flex-wrap gap-1.5 ${
+                  isDark ? 'bg-[#0A0D14] border-white/[0.08]' : 'bg-slate-100 border-slate-200'
+                }`}>
                   {suggestedPrompts.map(p => (
                     <button
                       key={p}
                       onClick={() => askQuestion(p)}
                       disabled={chatLoading}
-                      className={`text-[11px] px-2.5 py-1 rounded border transition ${
+                      className={`text-[11px] px-3 py-1 rounded-xl border transition ${
                         isDark
-                          ? 'border-slate-800 bg-[#0d1117] hover:border-slate-700 text-slate-400 hover:text-slate-200'
-                          : 'border-slate-200 bg-slate-100 hover:border-slate-300 text-slate-600'
+                          ? 'border-white/[0.08] bg-[#0E131E] hover:border-emerald-500/40 text-slate-400 hover:text-emerald-300'
+                          : 'border-slate-200 bg-white hover:border-slate-300 text-slate-700'
                       }`}
                     >
                       {p}
@@ -964,20 +1066,28 @@ export default function App() {
                   ))}
                 </div>
 
-                <form onSubmit={handleSendChat} className="mt-1 flex items-center space-x-2">
+                {/* Bottom Input Area */}
+                <form
+                  onSubmit={handleSendChat}
+                  className={`p-3.5 border rounded-b-2xl flex items-center space-x-2.5 ${
+                    isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
+                  }`}
+                >
                   <input
                     type="text"
                     value={chatQuestion}
                     onChange={e => setChatQuestion(e.target.value)}
-                    placeholder={`Ask about ${analysis.repositoryName}...`}
-                    className={`flex-1 rounded-md px-3 py-2 text-xs border focus:outline-none focus:ring-1 focus:ring-sky-500 ${
-                      isDark ? 'bg-[#0d1117] border-slate-800 text-slate-200 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-800'
+                    placeholder={`Ask anything about ${analysis.repositoryName}... (Press Enter)`}
+                    className={`flex-1 rounded-xl px-4 py-2.5 text-xs border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition ${
+                      isDark
+                        ? 'bg-[#07090E] border-white/[0.08] text-slate-200 placeholder-slate-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-800'
                     }`}
                   />
                   <button
                     type="submit"
                     disabled={chatLoading || !chatQuestion.trim()}
-                    className="bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-xs font-medium px-4 py-2 rounded-md transition flex items-center space-x-1"
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20 active:scale-95"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>Send</span>
@@ -988,10 +1098,10 @@ export default function App() {
 
             {/* 3. OVERVIEW TAB */}
             {activeTab === 'overview' && (
-              <div className="space-y-4 max-w-4xl mx-auto">
-                <div className={`p-4 rounded-lg border ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-sky-400 font-semibold">{analysis.overview?.applicationType}</span>
+              <div className="space-y-6 max-w-5xl mx-auto">
+                <div className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200 shadow-sm'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-mono text-emerald-400 font-semibold">{analysis.overview?.applicationType}</span>
                     <a
                       href={analysis.repositoryUrl}
                       target="_blank"
@@ -999,24 +1109,27 @@ export default function App() {
                       className="text-xs font-mono text-slate-400 hover:text-white flex items-center space-x-1"
                     >
                       <span>GitHub</span>
-                      <ExternalLink className="w-3 h-3" />
+                      <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
-                  <h2 className="text-base font-semibold text-white mb-2">{analysis.repositoryName}</h2>
-                  <div className="text-xs text-slate-300 leading-relaxed mb-3">
+                  <h2 className="text-xl font-bold text-white mb-2">{analysis.repositoryName}</h2>
+                  <div className="text-xs text-slate-300 leading-relaxed mb-4">
                     <MarkdownViewer content={analysis.overview?.purpose || ''} isDark={isDark} />
                   </div>
                   {analysis.overview?.businessFunctionality && (
-                    <div className="p-3 rounded bg-slate-900 border border-slate-800 text-xs text-slate-400 leading-relaxed">
+                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] text-xs text-slate-300 leading-relaxed">
                       {stripHtml(analysis.overview.businessFunctionality)}
                     </div>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className={`p-3.5 rounded-lg border ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                    <div className="text-xs font-semibold text-slate-300 mb-2">Languages</div>
-                    <div className="space-y-1.5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className={`p-5 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <div className="text-xs font-semibold text-white mb-3 flex items-center space-x-2">
+                      <Code className="w-4 h-4 text-emerald-400" />
+                      <span>Languages</span>
+                    </div>
+                    <div className="space-y-2">
                       {Object.entries(analysis.languageDistribution || {}).map(([lang, count]: any) => (
                         <div key={lang} className="flex items-center justify-between text-xs font-mono">
                           <span className="text-slate-300">{lang}</span>
@@ -1026,41 +1139,44 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className={`p-3.5 rounded-lg border ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                    <div className="text-xs font-semibold text-slate-300 mb-2">Frameworks</div>
-                    <div className="flex flex-wrap gap-1">
-                      {(analysis.detectedFrameworks || []).length > 0 ? (
-                        analysis.detectedFrameworks.map((fw: string) => (
-                          <span key={fw} className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                            {fw}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-slate-500">Standard language runtime</span>
-                      )}
+                  <div className={`p-5 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <div className="text-xs font-semibold text-white mb-3 flex items-center space-x-2">
+                      <Cpu className="w-4 h-4 text-cyan-400" />
+                      <span>Frameworks</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(analysis.detectedFrameworks || []).map((f: string) => (
+                        <span key={f} className="px-2.5 py-1 rounded-lg text-xs font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                          {f}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
-                  <div className={`p-3.5 rounded-lg border ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                    <div className="text-xs font-semibold text-slate-300 mb-2">Modules</div>
-                    <div className="flex flex-wrap gap-1">
-                      {(analysis.overview?.mainModules || []).map((m: string) => (
-                        <span key={m} className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                          {m}
-                        </span>
-                      ))}
+                  <div className={`p-5 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <div className="text-xs font-semibold text-white mb-3 flex items-center space-x-2">
+                      <Database className="w-4 h-4 text-amber-400" />
+                      <span>Database & Models</span>
+                    </div>
+                    <div className="text-xs text-slate-300 font-mono">
+                      {analysis.databaseInfo?.databaseTechnology || 'Standard Persistence'}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-2">
+                      {analysis.databaseInfo?.detectedModels?.length || 0} models detected
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 4. EXPLORER TAB */}
+            {/* 4. FILES EXPLORER TAB */}
             {activeTab === 'explorer' && (
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 h-[calc(100vh-160px)]">
-                <div className={`md:col-span-5 rounded-lg border p-3 overflow-y-auto ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 font-mono">
-                    Tree ({analysis.totalFiles} files)
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100vh-210px)] max-w-6xl mx-auto">
+                <div className={`md:col-span-5 p-4 rounded-2xl border overflow-y-auto ${
+                  isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
+                }`}>
+                  <div className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider font-mono">
+                    File Tree ({analysis.totalFiles} files)
                   </div>
                   <div className="space-y-0.5">
                     {(analysis.fileTree || []).map((node: any, idx: number) => (
@@ -1075,40 +1191,30 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className={`md:col-span-7 rounded-lg border p-4 overflow-y-auto ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`md:col-span-7 p-5 rounded-2xl border flex flex-col ${
+                  isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
+                }`}>
                   {selectedFileNode ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                        <div>
-                          <div className="text-[10px] font-mono text-slate-500 uppercase">{selectedFileNode.type}</div>
-                          <div className="text-sm font-semibold font-mono text-white mt-0.5">{selectedFileNode.name}</div>
-                          <div className="text-xs font-mono text-slate-400">{selectedFileNode.path}</div>
+                    <>
+                      <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/[0.08]">
+                        <div className="flex items-center space-x-2">
+                          <FileCode className="w-4 h-4 text-emerald-400" />
+                          <span className="font-mono text-xs font-semibold text-white">{selectedFileNode.path}</span>
                         </div>
-                        {selectedFileNode.language && (
-                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                            {selectedFileNode.language}
-                          </span>
+                        <span className="text-[11px] font-mono text-slate-400">{selectedFileNode.sizeFormatted}</span>
+                      </div>
+                      <div className="flex-1 overflow-auto bg-[#07090E] p-4 rounded-xl font-mono text-xs text-slate-300">
+                        {selectedFileNode.content ? (
+                          <pre>{selectedFileNode.content}</pre>
+                        ) : (
+                          <div className="text-slate-500 italic">Select a file to inspect its content.</div>
                         )}
                       </div>
-
-                      <div className="text-xs text-slate-300 leading-relaxed">
-                        {stripHtml(selectedFileNode.roleSummary)}
-                      </div>
-
-                      {selectedFileNode.type === 'FILE' && (
-                        <button
-                          onClick={() => {
-                            setActiveTab('chat');
-                            askQuestion(`Explain the functions and logic in ${selectedFileNode.path}`);
-                          }}
-                          className="text-xs px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-mono transition"
-                        >
-                          Ask about this file
-                        </button>
-                      )}
-                    </div>
+                    </>
                   ) : (
-                    <div className="text-xs text-slate-500 font-mono">Select a file from the tree to view its role.</div>
+                    <div className="flex-1 flex items-center justify-center text-xs text-slate-500 font-mono">
+                      Select a file from the tree to view its source code.
+                    </div>
                   )}
                 </div>
               </div>
@@ -1116,25 +1222,36 @@ export default function App() {
 
             {/* 5. WORKFLOWS TAB */}
             {activeTab === 'workflows' && (
-              <div className="space-y-4 max-w-4xl mx-auto">
+              <div className="space-y-6 max-w-5xl mx-auto">
                 {(analysis.workflows || []).map((wf: any, idx: number) => (
-                  <div key={idx} className={`p-4 rounded-lg border space-y-3 ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                    <div>
-                      <h3 className="text-sm font-semibold text-white">{stripHtml(wf.title)}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">{stripHtml(wf.description)}</p>
+                  <div key={idx} className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200 shadow-sm'}`}>
+                    <div className="flex items-center space-x-3 mb-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-mono text-xs font-bold">
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm text-white">{wf.title}</h3>
+                        <p className="text-xs text-slate-400">{wf.description}</p>
+                      </div>
                     </div>
-                    <MermaidCanvas chart={wf.mermaidCode} title={stripHtml(wf.title)} />
-                    {wf.steps && wf.steps.length > 0 && (
-                      <div className="space-y-1.5 pt-1">
-                        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">Steps</div>
-                        {wf.steps.map((s: string, si: number) => (
-                          <div key={si} className="text-xs text-slate-300 flex items-center space-x-2 font-mono">
-                            <ArrowRight className="w-3 h-3 text-sky-400 shrink-0" />
-                            <span>{stripHtml(s)}</span>
-                          </div>
-                        ))}
+
+                    {wf.mermaidChart && (
+                      <div className="my-4">
+                        <MermaidChart chart={wf.mermaidChart} title={wf.title} />
                       </div>
                     )}
+
+                    <div className="space-y-1.5 mt-3">
+                      <div className="text-xs font-semibold text-slate-300 mb-1">Execution Steps:</div>
+                      {(wf.steps || []).map((s: string, sIdx: number) => (
+                        <div key={sIdx} className="flex items-start space-x-2 text-xs text-slate-300">
+                          <span className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-mono flex items-center justify-center shrink-0 mt-0.5">
+                            {sIdx + 1}
+                          </span>
+                          <span>{s}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1142,52 +1259,36 @@ export default function App() {
 
             {/* 6. COMPONENTS TAB */}
             {activeTab === 'components' && (
-              <div className="space-y-3 max-w-5xl mx-auto">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs text-slate-400 font-mono">
-                    Showing {filteredComponents.length} components
-                  </div>
-                  <div className="relative w-64">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={compSearch}
-                      onChange={e => setCompSearch(e.target.value)}
-                      placeholder="Filter components..."
-                      className={`w-full rounded pl-8 pr-2.5 py-1 text-xs border focus:outline-none focus:ring-1 focus:ring-sky-500 ${
-                        isDark ? 'bg-[#0d1117] border-slate-800 text-slate-200' : 'bg-white border-slate-300'
-                      }`}
-                    />
-                  </div>
+              <div className="space-y-4 max-w-5xl mx-auto">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={compSearch}
+                    onChange={e => setCompSearch(e.target.value)}
+                    placeholder="Search classes, controllers, services, models..."
+                    className={`w-full rounded-xl pl-9 pr-3 py-2 text-xs font-mono border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+                      isDark ? 'bg-[#0E131E] border-white/[0.08] text-white placeholder-slate-500' : 'bg-white border-slate-300'
+                    }`}
+                  />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {filteredComponents.map((c: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-lg border flex flex-col justify-between space-y-2 ${
-                        isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-mono font-semibold text-xs text-sky-400">{c.name}</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                            {c.category}
-                          </span>
-                        </div>
-                        <div className="text-[11px] font-mono text-slate-500 mb-1.5 truncate">{c.filePath}</div>
-                        <div className="text-xs text-slate-300 leading-relaxed">
-                          {stripHtml(c.responsibility)}
-                        </div>
+                    <div key={idx} className={`p-4 rounded-xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-mono text-xs font-bold text-white">{c.name}</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {c.category}
+                        </span>
                       </div>
-
+                      <div className="text-[11px] font-mono text-slate-400 mb-2 truncate">{c.filePath}</div>
+                      <div className="text-xs text-slate-300 leading-relaxed mb-2">{c.responsibility}</div>
                       {c.relatedComponents && c.relatedComponents.length > 0 && (
-                        <div className="pt-2 border-t border-slate-800 flex flex-wrap gap-1">
-                          <span className="text-[10px] text-slate-500 font-mono">imports:</span>
-                          {c.relatedComponents.map((imp: string, ii: number) => (
-                            <span key={ii} className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-                              {imp}
+                        <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t border-white/[0.06]">
+                          {c.relatedComponents.map((dep: string, dIdx: number) => (
+                            <span key={dIdx} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] text-slate-400">
+                              {dep}
                             </span>
                           ))}
                         </div>
@@ -1200,84 +1301,68 @@ export default function App() {
 
             {/* 7. APIS TAB */}
             {activeTab === 'apis' && (
-              <div className="space-y-2 max-w-4xl mx-auto">
-                <div className="text-xs text-slate-400 font-mono mb-2">
-                  Total Endpoints & Handlers: {(analysis.apis || []).length}
-                </div>
-                {(analysis.apis || []).map((api: any, idx: number) => (
-                  <div
-                    key={idx}
-                    className={`p-2.5 rounded border flex items-center justify-between gap-3 text-xs ${
-                      isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2 font-mono">
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-emerald-400 border border-slate-700">
-                        {api.method}
-                      </span>
-                      <span className="font-semibold text-white">{api.path}</span>
+              <div className="space-y-4 max-w-5xl mx-auto">
+                <div className="grid grid-cols-1 gap-2.5">
+                  {(analysis.apis || []).map((api: any, idx: number) => (
+                    <div key={idx} className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-mono ${
+                      isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
+                    }`}>
+                      <div className="flex items-center space-x-3">
+                        <span className={`px-2 py-1 rounded text-[11px] font-bold ${
+                          api.method === 'GET' ? 'bg-sky-500/15 text-sky-400' :
+                          api.method === 'POST' ? 'bg-emerald-500/15 text-emerald-400' :
+                          api.method === 'PUT' ? 'bg-amber-500/15 text-amber-400' :
+                          'bg-rose-500/15 text-rose-400'
+                        }`}>
+                          {api.method}
+                        </span>
+                        <span className="font-semibold text-white">{api.path}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-slate-400">{api.description}</span>
+                        <span className="text-[10px] text-slate-500 block">{api.filePath}</span>
+                      </div>
                     </div>
-                    <div className="text-slate-400 font-mono text-[11px] truncate max-w-xs">{api.filePath}</div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
 
             {/* 8. DATABASE TAB */}
             {activeTab === 'database' && (
-              <div className="space-y-4 max-w-4xl mx-auto">
-                {analysis.databaseInfo?.mermaidErDiagram && (
-                  <MermaidCanvas
-                    chart={analysis.databaseInfo.mermaidErDiagram}
-                    title="Data Store Model"
-                  />
-                )}
-                <div className={`p-4 rounded-lg border space-y-3 ${isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="text-xs font-mono">
-                    <span className="text-slate-500">Database Engine: </span>
-                    <span className="font-semibold text-emerald-400">{analysis.databaseInfo?.databaseTechnology}</span>
+              <div className="space-y-6 max-w-5xl mx-auto">
+                <div className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
+                  <h3 className="font-bold text-sm text-white mb-2">Persistence Architecture</h3>
+                  <div className="text-xs text-slate-300 leading-relaxed mb-4">
+                    {analysis.databaseInfo?.dataFlowSummary}
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {stripHtml(analysis.databaseInfo?.dataFlowSummary || '')}
-                  </p>
-
-                  {analysis.databaseInfo?.detectedModels?.length > 0 && (
-                    <div>
-                      <div className="text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                        Collections / Entities
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {analysis.databaseInfo.detectedModels.map((m: string) => (
-                          <span key={m} className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-sky-300 border border-slate-700">
-                            {m}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div className="text-xs font-semibold text-white mb-2">Discovered Models & Tables:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {(analysis.databaseInfo?.detectedModels || []).map((m: string, idx: number) => (
+                      <span key={idx} className="px-3 py-1.5 rounded-xl text-xs font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
 
             {/* 9. DEPENDENCIES TAB */}
             {activeTab === 'dependencies' && (
-              <div className="space-y-2 max-w-4xl mx-auto">
-                <div className="text-xs text-slate-400 font-mono mb-2">
-                  Total Dependencies: {(analysis.dependencies || []).length}
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  {(analysis.dependencies || []).map((d: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={`p-2.5 rounded border text-xs ${
-                        isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-white">{d.name}</span>
-                        <span className="text-[10px] text-slate-500">{d.version}</span>
+              <div className="space-y-4 max-w-5xl mx-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(analysis.dependencies || []).map((dep: any, idx: number) => (
+                    <div key={idx} className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-mono ${
+                      isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'
+                    }`}>
+                      <div>
+                        <div className="font-bold text-white">{dep.name}</div>
+                        <div className="text-[10px] text-slate-400">{dep.purpose}</div>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 truncate">{d.purpose}</div>
+                      <span className="px-2 py-0.5 rounded bg-white/[0.06] text-slate-300 text-[11px]">
+                        {dep.version || 'detected'}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1286,49 +1371,33 @@ export default function App() {
 
             {/* 10. ONBOARDING GUIDE TAB */}
             {activeTab === 'onboarding' && (
-              <div className="space-y-3 max-w-4xl mx-auto">
-                <div className="text-xs text-slate-400 font-mono mb-2">
-                  5-Day Project Onboarding Sequence
-                </div>
-                {(analysis.onboardingGuide || []).map((day: any) => (
-                  <div
-                    key={day.day}
-                    className={`p-4 rounded-lg border space-y-2 ${
-                      isDark ? 'bg-[#0d1117] border-slate-800' : 'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-semibold font-mono text-white">
-                        Day {day.day}: {stripHtml(day.title)}
-                      </h3>
+              <div className="space-y-6 max-w-5xl mx-auto">
+                {(analysis.onboardingGuide || []).map((day: any, idx: number) => (
+                  <div key={idx} className={`p-6 rounded-2xl border ${isDark ? 'bg-[#0E131E] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
+                    <div className="flex items-center space-x-3 mb-2">
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400">
+                        Day {day.day}
+                      </span>
+                      <h3 className="font-bold text-sm text-white">{day.title}</h3>
                     </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      {stripHtml(day.focusArea)}
-                    </p>
-
-                    {day.filesToRead && day.filesToRead.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1 pt-1">
-                        <span className="text-[10px] font-mono text-slate-500">Read:</span>
-                        {day.filesToRead.map((f: string) => (
-                          <span key={f} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 border border-slate-700">
-                            {f}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {day.practicalExercise && (
-                      <div className="text-xs p-2.5 rounded bg-slate-900 border border-slate-800 text-emerald-400 font-mono">
-                        Exercise: {stripHtml(day.practicalExercise)}
-                      </div>
-                    )}
+                    <p className="text-xs text-slate-300 leading-relaxed mb-3">{day.goal}</p>
+                    <div className="space-y-1.5 pl-4 border-l-2 border-emerald-500/30">
+                      {(day.tasks || []).map((task: string, tIdx: number) => (
+                        <div key={tIdx} className="text-xs text-slate-400 flex items-center space-x-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>{task}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
-          </main>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+export default App;
