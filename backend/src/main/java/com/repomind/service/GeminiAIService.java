@@ -14,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
@@ -24,17 +25,23 @@ public class GeminiAIService {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    // Verified active Google Gemini models
-    private static final String[] MODEL_FALLBACKS = {
-            "gemini-1.5-flash",
+    // Cache discovered models per API key
+    private final Map<String, List<String>> discoveredModelsCache = new ConcurrentHashMap<>();
+
+    // Fallback models in priority order based on Google AI Studio latest endpoints
+    private static final String[] STATIC_FALLBACK_MODELS = {
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
+            "gemini-1.5-flash",
             "gemini-1.5-pro",
-            "gemini-2.0-flash-lite"
+            "gemini-pro"
     };
 
     public GeminiAIService(
             @Value("${repomind.gemini.api-key:}") String injectedKey,
-            @Value("${repomind.gemini.model:gemini-1.5-flash}") String configuredModel) {
+            @Value("${repomind.gemini.model:gemini-3.8-flash}") String configuredModel) {
         this.configuredModel = configuredModel;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
@@ -111,7 +118,7 @@ public class GeminiAIService {
             return null;
         }
 
-        List<String> modelsToTry = buildModelList();
+        List<String> modelsToTry = buildModelList(activeKey);
 
         for (String model : modelsToTry) {
             String res = invokeModel(model, prompt, activeKey);
@@ -136,7 +143,7 @@ public class GeminiAIService {
             return null;
         }
 
-        List<String> modelsToTry = buildModelList();
+        List<String> modelsToTry = buildModelList(activeKey);
 
         for (String model : modelsToTry) {
             String res = invokeChatModel(model, systemInstruction, history, question, activeKey);
@@ -147,23 +154,113 @@ public class GeminiAIService {
         return null;
     }
 
-    private List<String> buildModelList() {
-        List<String> modelsToTry = new ArrayList<>();
+    /**
+     * Dynamically discovers supported models from Google's ModelService.ListModels API.
+     * Caches the list to avoid latency on subsequent calls.
+     */
+    private List<String> buildModelList(String activeKey) {
+        List<String> models = new ArrayList<>();
+
+        // Add explicitly configured model if set
         if (configuredModel != null && !configuredModel.isBlank()) {
-            modelsToTry.add(configuredModel.trim());
+            models.add(cleanModelName(configuredModel));
         }
-        for (String fallback : MODEL_FALLBACKS) {
-            if (!modelsToTry.contains(fallback)) {
-                modelsToTry.add(fallback);
+
+        // Check if we have already discovered models from Google API
+        List<String> discovered = discoveredModelsCache.get(activeKey);
+        if (discovered == null || discovered.isEmpty()) {
+            discovered = queryGoogleForSupportedModels(activeKey);
+            if (!discovered.isEmpty()) {
+                discoveredModelsCache.put(activeKey, discovered);
             }
         }
-        return modelsToTry;
+
+        if (discovered != null && !discovered.isEmpty()) {
+            for (String dm : discovered) {
+                if (!models.contains(dm)) {
+                    models.add(dm);
+                }
+            }
+        }
+
+        // Add static fallbacks as safeguards
+        for (String fallback : STATIC_FALLBACK_MODELS) {
+            if (!models.contains(fallback)) {
+                models.add(fallback);
+            }
+        }
+
+        return models;
+    }
+
+    private List<String> queryGoogleForSupportedModels(String activeKey) {
+        try {
+            String url = "https://generativelanguage.googleapis.com/v1beta/models?key=" + activeKey;
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                JsonNode root = objectMapper.readTree(response.body());
+                JsonNode modelsArray = root.path("models");
+                if (modelsArray.isArray() && !modelsArray.isEmpty()) {
+                    List<String> usable = new ArrayList<>();
+                    for (JsonNode m : modelsArray) {
+                        JsonNode methods = m.path("supportedGenerationMethods");
+                        boolean supportsGenerate = false;
+                        if (methods.isArray()) {
+                            for (JsonNode method : methods) {
+                                if ("generateContent".equalsIgnoreCase(method.asText())) {
+                                    supportsGenerate = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (supportsGenerate) {
+                            String name = cleanModelName(m.path("name").asText(""));
+                            if (!name.isBlank()) {
+                                usable.add(name);
+                            }
+                        }
+                    }
+
+                    // Sort flash/chat models to the top
+                    usable.sort((a, b) -> {
+                        int aScore = (a.contains("flash") ? 10 : 0) + (a.contains("3.") ? 5 : 0) + (a.contains("2.") ? 3 : 0);
+                        int bScore = (b.contains("flash") ? 10 : 0) + (b.contains("3.") ? 5 : 0) + (b.contains("2.") ? 3 : 0);
+                        return Integer.compare(bScore, aScore);
+                    });
+
+                    log.info("Discovered active Google Gemini models: {}", usable);
+                    return usable;
+                }
+            } else {
+                log.warn("ModelService.ListModels returned HTTP {}: {}", response.statusCode(), response.body());
+            }
+        } catch (Exception e) {
+            log.warn("ModelService.ListModels call failed: {}", e.getMessage());
+        }
+        return Collections.emptyList();
+    }
+
+    private String cleanModelName(String raw) {
+        if (raw == null) return "";
+        String s = raw.trim();
+        if (s.startsWith("models/")) {
+            s = s.substring("models/".length());
+        }
+        return s;
     }
 
     private String invokeModel(String model, String prompt, String activeKey) {
+        String cleanModel = cleanModelName(model);
         try {
             String url = "https://generativelanguage.googleapis.com/v1beta/models/"
-                    + model + ":generateContent?key=" + activeKey;
+                    + cleanModel + ":generateContent?key=" + activeKey;
 
             Map<String, Object> body = Map.of(
                     "contents", List.of(
@@ -185,10 +282,10 @@ public class GeminiAIService {
             if (response.statusCode() == 200) {
                 return extractTextFromResponse(response.body());
             } else {
-                log.warn("Gemini model {} returned HTTP {}: {}", model, response.statusCode(), response.body());
+                log.warn("Gemini model {} returned HTTP {}: {}", cleanModel, response.statusCode(), response.body());
             }
         } catch (Exception e) {
-            log.warn("Gemini model {} invocation failed: {}", model, e.getMessage());
+            log.warn("Gemini model {} invocation failed: {}", cleanModel, e.getMessage());
         }
         return null;
     }
@@ -200,13 +297,13 @@ public class GeminiAIService {
             String question,
             String activeKey) {
 
+        String cleanModel = cleanModelName(model);
         try {
             String url = "https://generativelanguage.googleapis.com/v1beta/models/"
-                    + model + ":generateContent?key=" + activeKey;
+                    + cleanModel + ":generateContent?key=" + activeKey;
 
             List<Map<String, Object>> contents = new ArrayList<>();
 
-            // If history is provided, add previous turns (user / model)
             if (history != null && !history.isEmpty()) {
                 for (Map<String, String> item : history) {
                     String role = item.getOrDefault("role", "user");
@@ -223,7 +320,6 @@ public class GeminiAIService {
                 }
             }
 
-            // Append current user question
             contents.add(Map.of(
                     "role", "user",
                     "parts", List.of(Map.of("text", question))
@@ -252,15 +348,15 @@ public class GeminiAIService {
             if (response.statusCode() == 200) {
                 return extractTextFromResponse(response.body());
             } else {
-                log.warn("Gemini chat model {} returned HTTP {}: {}", model, response.statusCode(), response.body());
-                // If 400 because system_instruction is not supported on this model version, retry with prepended prompt
+                log.warn("Gemini chat model {} returned HTTP {}: {}", cleanModel, response.statusCode(), response.body());
+                // If model returns 400 because system_instruction isn't supported, retry with prepended prompt
                 if (response.statusCode() == 400 && systemInstruction != null) {
                     String combinedPrompt = systemInstruction + "\n\nUser Question: " + question;
-                    return invokeModel(model, combinedPrompt, activeKey);
+                    return invokeModel(cleanModel, combinedPrompt, activeKey);
                 }
             }
         } catch (Exception e) {
-            log.warn("Gemini chat model {} invocation failed: {}", model, e.getMessage());
+            log.warn("Gemini chat model {} invocation failed: {}", cleanModel, e.getMessage());
         }
         return null;
     }

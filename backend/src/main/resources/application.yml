@@ -8,7 +8,7 @@ spring:
 repomind:
   gemini:
     api-key: ${GEMINI_API_KEY:}
-    model: ${GEMINI_MODEL:gemini-1.5-flash}
+    model: ${GEMINI_MODEL:gemini-3.8-flash}
   storage:
     clone-dir: ${CLONE_DIR:${java.io.tmpdir}/repomind-repos}
 
