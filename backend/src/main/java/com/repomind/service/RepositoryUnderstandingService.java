@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -91,7 +92,7 @@ public class RepositoryUnderstandingService {
         List<String> dataAccessList = new ArrayList<>(dataAccessFiles);
 
         // Build Database Info first so Architecture and Workflows can reference actual DB tech
-        DatabaseInfo dbInfo = buildDatabaseInfo(fullName, frameworks, dependencies, dbModelList, dataAccessList, components);
+        DatabaseInfo dbInfo = buildDatabaseInfo(fullName, primaryLanguage, frameworks, dependencies, dbModelList, dataAccessList, components, fileContentsMap);
 
         // Build Dynamic GitDiagram-style Architecture Data with real file-to-file import edges
         ArchitectureData architecture = buildArchitecture(fullName, primaryLanguage, frameworks, components, apis, dbInfo);
@@ -150,6 +151,59 @@ public class RepositoryUnderstandingService {
 
     public List<RepositoryAnalysisResult> listAllAnalyzed() {
         return new ArrayList<>(analysisStore.values());
+    }
+
+    public Map<String, Object> getFileContent(String repoId, String relPath) {
+        RepositoryAnalysisResult repo = getAnalysis(repoId);
+        Path rootPath = repoPathStore.get(repoId);
+        Map<String, String> fileContents = repoFileContentsStore.getOrDefault(repoId, Map.of());
+
+        String cleanRel = (relPath == null ? "" : relPath).trim().replace('\\', '/');
+        while (cleanRel.startsWith("/")) {
+            cleanRel = cleanRel.substring(1);
+        }
+
+        String content = null;
+        long size = 0;
+        if (rootPath != null) {
+            try {
+                Path resolved = rootPath.resolve(cleanRel).normalize();
+                if (!resolved.startsWith(rootPath.normalize())) {
+                    throw new SecurityException("Unauthorized path traversal attempt");
+                }
+                if (Files.exists(resolved) && !Files.isDirectory(resolved)) {
+                    size = Files.size(resolved);
+                    if (size > 2_500_000) {
+                        content = "// File size is " + (size / 1024) + " KB (exceeds preview limit).";
+                    } else {
+                        try {
+                            content = Files.readString(resolved, StandardCharsets.UTF_8);
+                        } catch (Exception e) {
+                            content = "// Binary file (preview not supported)";
+                        }
+                    }
+                }
+            } catch (SecurityException se) {
+                throw se;
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (content == null && fileContents.containsKey(cleanRel)) {
+            content = fileContents.get(cleanRel);
+            size = content.length();
+        }
+
+        if (content == null) {
+            throw new IllegalArgumentException("File not found in repository: " + cleanRel);
+        }
+
+        return Map.of(
+                "path", cleanRel,
+                "content", content,
+                "size", size,
+                "language", detectLanguage(cleanRel) != null ? detectLanguage(cleanRel) : "Text"
+        );
     }
 
     public Map<String, Object> answerChatQuestion(String repoId, String question) {
@@ -777,8 +831,8 @@ public class RepositoryUnderstandingService {
                             .build());
                 }
 
-                // Extract Firestore collections: db.collection("...")
-                Matcher firestoreMatcher = Pattern.compile("collection\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)").matcher(content);
+                // Extract Firestore collections: db.collection("...") or firestore.collection("...")
+                Matcher firestoreMatcher = Pattern.compile("(?:db|firestore)\\.collection\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)").matcher(content);
                 while (firestoreMatcher.find()) {
                     databaseModels.add(firestoreMatcher.group(1) + " (Firestore Collection)");
                     dataAccessFiles.add(relPath);
@@ -1138,7 +1192,7 @@ public class RepositoryUnderstandingService {
         if (lower.equals("streamlit")) { frameworks.add("Streamlit"); return "Interactive Python Web UI & Dashboard framework"; }
         if (lower.contains("langchain_google_genai") || lower.contains("google-generativeai")) { frameworks.add("Google Gemini AI"); return "Google Gemini LLM integration"; }
         if (lower.contains("langchain")) { frameworks.add("LangChain"); return "AI Agent & LLM orchestration framework"; }
-        if (lower.contains("firebase_admin") || lower.contains("firebase")) { frameworks.add("Firebase Firestore"); return "Firebase Admin SDK & Firestore NoSQL client"; }
+        if (lower.equals("firebase-admin") || lower.equals("firebase_admin") || lower.equals("firebase")) { frameworks.add("Firebase Firestore"); return "Firebase Admin SDK & Firestore NoSQL client"; }
         if (lower.equals("fastapi")) { frameworks.add("FastAPI"); return "High-performance async Python REST framework"; }
         if (lower.equals("flask")) { frameworks.add("Flask"); return "Lightweight Python web application framework"; }
         if (lower.equals("django")) { frameworks.add("Django"); return "Full-stack Python web framework"; }
@@ -1169,7 +1223,7 @@ public class RepositoryUnderstandingService {
         for (String content : fileContentsMap.values()) {
             if (content.contains("import streamlit")) frameworks.add("Streamlit");
             if (content.contains("langchain_google_genai") || content.contains("GoogleGenerativeAI")) frameworks.add("Google Gemini AI");
-            if (content.contains("firebase_admin") || content.contains("firestore.client")) frameworks.add("Firebase Firestore");
+            if (content.contains("import firebase_admin") || content.contains("from firebase_admin") || content.contains("require('firebase-admin')")) frameworks.add("Firebase Firestore");
             if (content.contains("@SpringBootApplication")) frameworks.add("Spring Boot");
         }
     }
@@ -1392,54 +1446,203 @@ public class RepositoryUnderstandingService {
 
     private DatabaseInfo buildDatabaseInfo(
             String fullName,
+            String primaryLanguage,
+            Set<String> frameworks,
+            List<DependencyItem> deps,
+            List<String> models,
+            List<String> dataAccessFiles,
+            List<ComponentItem> components,
+            Map<String, String> fileContentsMap) {
+
+        // 1. If Gemini AI is active, invoke AI to synthesize authentic persistence architecture and data models
+        if (geminiService.isConfigured()) {
+            try {
+                String aiPrompt = buildDataModelAiPrompt(fullName, primaryLanguage, frameworks, deps, models, dataAccessFiles, fileContentsMap);
+                String aiJson = geminiService.generateText(aiPrompt);
+                DatabaseInfo parsed = parseDatabaseInfoFromAi(aiJson, fullName, models, dataAccessFiles);
+                if (parsed != null) {
+                    log.info("Gemini AI successfully synthesized persistence architecture for repository: {}", fullName);
+                    return parsed;
+                }
+            } catch (Exception e) {
+                log.warn("Gemini AI data models synthesis error, falling back to local analysis: {}", e.getMessage());
+            }
+        }
+
+        // 2. Strict, realistic local fallback (no false positives, no loose 'firebase' strings)
+        return buildLocalDatabaseInfo(fullName, frameworks, deps, models, dataAccessFiles, components);
+    }
+
+    private String buildDataModelAiPrompt(
+            String fullName,
+            String primaryLanguage,
+            Set<String> frameworks,
+            List<DependencyItem> deps,
+            List<String> candidateModels,
+            List<String> dataAccessFiles,
+            Map<String, String> fileContentsMap) {
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are Gitly AI, an expert software architecture and database analyzer.\n");
+        sb.append("Analyze the repository '").append(fullName).append("' to determine its persistence layer, database technology, and data models.\n\n");
+        sb.append("Primary Language: ").append(primaryLanguage).append("\n");
+        sb.append("Detected Frameworks: ").append(frameworks).append("\n");
+        sb.append("Dependencies: ");
+        deps.stream().limit(30).forEach(d -> sb.append(d.getName()).append(", "));
+        sb.append("\n");
+
+        if (!candidateModels.isEmpty()) {
+            sb.append("Candidate Model/Entity Files: ").append(String.join(", ", candidateModels.stream().limit(10).toList())).append("\n");
+        }
+        if (!dataAccessFiles.isEmpty()) {
+            sb.append("Data Access / Service Files: ").append(String.join(", ", dataAccessFiles.stream().limit(8).toList())).append("\n");
+        }
+
+        sb.append("\nRelevant Code Excerpts:\n");
+        int snippetCount = 0;
+        for (Map.Entry<String, String> entry : fileContentsMap.entrySet()) {
+            String path = entry.getKey().toLowerCase();
+            if (path.contains("schema") || path.contains("model") || path.contains("entity") || path.contains("database") || path.contains("prisma") || path.contains("sql") || path.endsWith(".yml") || path.endsWith(".properties")) {
+                sb.append("--- ").append(entry.getKey()).append(" ---\n");
+                String content = entry.getValue();
+                sb.append(content.length() > 600 ? content.substring(0, 600) + "\n..." : content).append("\n\n");
+                if (++snippetCount >= 4) break;
+            }
+        }
+
+        sb.append("INSTRUCTIONS:\n");
+        sb.append("1. Determine the EXACT database technology used. If NO database is used (e.g. CLI tool, frontend-only, stateless web app), specify 'Stateless / In-Memory State / External APIs'. NEVER claim Firebase, SQL, or MongoDB unless an actual database library, config, or connection is in this codebase.\n");
+        sb.append("2. Write a clear, factual 2-3 sentence 'dataFlowSummary' explaining how data is handled or persisted.\n");
+        sb.append("3. Provide 'detectedModels': array of real domain models, entities, or collections found in the code (empty array [] if none).\n");
+        sb.append("4. Provide 'mermaidErDiagram': valid Mermaid syntax (starting with 'erDiagram' or 'flowchart LR') illustrating the data persistence or flow.\n\n");
+        sb.append("OUTPUT REQUIREMENT: Respond ONLY with valid JSON (no markdown fences, no extra commentary):\n");
+        sb.append("{\n");
+        sb.append("  \"databaseTechnology\": \"string\",\n");
+        sb.append("  \"dataFlowSummary\": \"string\",\n");
+        sb.append("  \"detectedModels\": [\"string\"],\n");
+        sb.append("  \"mermaidErDiagram\": \"string\"\n");
+        sb.append("}\n");
+
+        return sb.toString();
+    }
+
+    private DatabaseInfo parseDatabaseInfoFromAi(String aiResponse, String fullName, List<String> fallbackModels, List<String> fallbackAccess) {
+        if (aiResponse == null || aiResponse.isBlank()) return null;
+        try {
+            String clean = aiResponse.trim();
+            if (clean.startsWith("```json")) {
+                clean = clean.substring(7);
+            } else if (clean.startsWith("```")) {
+                clean = clean.substring(3);
+            }
+            if (clean.endsWith("```")) {
+                clean = clean.substring(0, clean.length() - 3);
+            }
+            clean = clean.trim();
+
+            JsonNode root = objectMapper.readTree(clean);
+            String dbTech = root.has("databaseTechnology") ? root.get("databaseTechnology").asText() : "Stateless / In-Memory State";
+            String dataFlowSummary = root.has("dataFlowSummary") ? root.get("dataFlowSummary").asText() : "";
+            List<String> models = new ArrayList<>();
+            if (root.has("detectedModels") && root.get("detectedModels").isArray()) {
+                for (JsonNode m : root.get("detectedModels")) {
+                    models.add(m.asText());
+                }
+            }
+            if (models.isEmpty() && !fallbackModels.isEmpty()) {
+                models = fallbackModels;
+            }
+
+            String mermaid = root.has("mermaidErDiagram") ? root.get("mermaidErDiagram").asText().trim() : "";
+            if (mermaid.isBlank()) {
+                mermaid = "flowchart LR\n    Client[\"Client Request\"] --> App[\"" + sanitizeMermaidLabel(fullName) + "\"]\n    App --> State[\"Runtime State\"]\n";
+            }
+
+            return DatabaseInfo.builder()
+                    .databaseTechnology(dbTech)
+                    .dataFlowSummary(dataFlowSummary)
+                    .detectedModels(models)
+                    .dataAccessFiles(fallbackAccess)
+                    .mermaidErDiagram(mermaid)
+                    .build();
+        } catch (Exception e) {
+            log.warn("Failed to parse JSON response from Gemini AI: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private DatabaseInfo buildLocalDatabaseInfo(
+            String fullName,
             Set<String> frameworks,
             List<DependencyItem> deps,
             List<String> models,
             List<String> dataAccessFiles,
             List<ComponentItem> components) {
 
-        String dbTech = "In-Memory / Client State & REST APIs";
-        if (frameworks.contains("Firebase Firestore")) {
-            dbTech = "Google Firebase Firestore (NoSQL Document DB)";
-        } else {
-            for (DependencyItem d : deps) {
-                String n = d.getName().toLowerCase();
-                if (n.contains("firebase")) { dbTech = "Google Firebase Firestore"; break; }
-                else if (n.contains("postgres") || n.contains("pg")) { dbTech = "PostgreSQL Relational DB"; break; }
-                else if (n.contains("mysql")) { dbTech = "MySQL Relational DB"; break; }
-                else if (n.contains("h2")) { dbTech = "H2 / JPA Relational Database"; break; }
-                else if (n.contains("data-jpa") || n.contains("hibernate")) { dbTech = "Spring Data JPA / Hibernate SQL"; break; }
-                else if (n.contains("mongo") || n.contains("mongoose")) { dbTech = "MongoDB NoSQL Database"; break; }
-                else if (n.contains("prisma")) { dbTech = "Prisma ORM Database"; break; }
-                else if (n.contains("redis")) { dbTech = "Redis Key-Value Store"; break; }
-                else if (n.contains("axios") && dbTech.startsWith("In-Memory")) { dbTech = "External REST API via Axios Client"; }
+        String dbTech = "Stateless / In-Memory State";
+        for (DependencyItem d : deps) {
+            String n = d.getName().toLowerCase();
+            if (n.equals("firebase-admin") || n.equals("@angular/fire") || n.contains("firebase-admin")) {
+                dbTech = "Firebase Firestore"; break;
+            } else if (n.equals("pg") || n.equals("postgresql") || n.contains("postgresql") || n.contains("r2dbc-postgresql")) {
+                dbTech = "PostgreSQL Relational DB"; break;
+            } else if (n.equals("mysql") || n.equals("mysql2") || n.contains("mysql-connector")) {
+                dbTech = "MySQL Relational DB"; break;
+            } else if (n.equals("h2") || n.contains("com.h2database")) {
+                dbTech = "H2 In-Memory Relational DB"; break;
+            } else if (n.contains("spring-boot-starter-data-jpa") || n.equals("hibernate-core")) {
+                dbTech = "Spring Data JPA / Relational DB"; break;
+            } else if (n.equals("mongodb") || n.equals("mongoose") || n.contains("spring-boot-starter-data-mongodb")) {
+                dbTech = "MongoDB NoSQL Database"; break;
+            } else if (n.equals("prisma") || n.equals("@prisma/client")) {
+                dbTech = "Prisma ORM Database"; break;
+            } else if (n.equals("redis") || n.equals("ioredis") || n.contains("spring-boot-starter-data-redis")) {
+                dbTech = "Redis Key-Value Cache"; break;
+            } else if (n.equals("sqlite3") || n.equals("better-sqlite3") || n.contains("sqlite")) {
+                dbTech = "SQLite Embedded Database"; break;
             }
         }
 
-        // Build dynamic Mermaid ER / Collection diagram showing actual models & files!
+        boolean hasDatabase = !dbTech.equals("Stateless / In-Memory State");
+
         StringBuilder er = new StringBuilder("flowchart LR\n");
-        er.append("    DB[(\"") .append(sanitizeMermaidLabel(dbTech)).append("\")]\n");
+        if (hasDatabase) {
+            er.append("    DB[(\"").append(sanitizeMermaidLabel(dbTech)).append("\")]\n");
+            List<String> accessList = dataAccessFiles.isEmpty()
+                    ? components.stream().limit(3).map(ComponentItem::getFilePath).toList()
+                    : dataAccessFiles.stream().limit(5).toList();
 
-        List<String> accessList = dataAccessFiles.isEmpty()
-                ? components.stream().limit(3).map(ComponentItem::getFilePath).toList()
-                : dataAccessFiles.stream().limit(5).toList();
-
-        for (int i = 0; i < accessList.size(); i++) {
-            er.append("    DA").append(i).append("[\"").append(sanitizeMermaidLabel(accessList.get(i))).append("\"] --> DB\n");
+            for (int i = 0; i < accessList.size(); i++) {
+                er.append("    DA").append(i).append("[\"").append(sanitizeMermaidLabel(accessList.get(i))).append("\"] --> DB\n");
+            }
+            if (!models.isEmpty()) {
+                int idx = 0;
+                for (String m : models.stream().limit(8).toList()) {
+                    idx++;
+                    er.append("    DB --> COL").append(idx).append("[\"").append(sanitizeMermaidLabel(m)).append("\"]\n");
+                }
+            }
+        } else {
+            er.append("    Client[\"Client Request\"] --> App[\"").append(sanitizeMermaidLabel(fullName)).append("\"]\n");
+            er.append("    App --> State[\"Runtime / In-Memory State\"]\n");
+            if (!models.isEmpty()) {
+                for (int i = 0; i < Math.min(models.size(), 4); i++) {
+                    er.append("    State --> M").append(i).append("[\"").append(sanitizeMermaidLabel(models.get(i))).append("\"]\n");
+                }
+            }
         }
 
-        if (!models.isEmpty()) {
-            int idx = 0;
-            for (String m : models.stream().limit(8).toList()) {
-                idx++;
-                er.append("    DB --> COL").append(idx).append("[\"").append(sanitizeMermaidLabel(m)).append("\"]\n");
-            }
+        String summary;
+        if (hasDatabase) {
+            summary = fullName + " utilizes " + dbTech + " for persistent storage"
+                    + (models.isEmpty() ? "." : " with " + models.size() + " detected data models: " + String.join(", ", models) + ".");
+        } else {
+            summary = fullName + " does not configure dedicated database persistence. Application state and workflows are executed in-memory or through external services.";
         }
 
         return DatabaseInfo.builder()
                 .databaseTechnology(dbTech)
-                .dataFlowSummary("In " + fullName + ", data persistence is powered by " + dbTech
-                        + (models.isEmpty() ? "." : " with " + models.size() + " discovered collections/entities/schemas: " + String.join(", ", models) + "."))
+                .dataFlowSummary(summary)
                 .mermaidErDiagram(er.toString())
                 .detectedModels(models)
                 .dataAccessFiles(dataAccessFiles)

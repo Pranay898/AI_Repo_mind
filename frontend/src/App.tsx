@@ -505,6 +505,16 @@ function MarkdownViewer({ content, isDark = true }: { content: string; isDark?: 
 }
 
 /**
+ * Formats raw file size in bytes to human-readable format.
+ */
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/**
  * File tree item for the repository explorer
  */
 function FileTreeItem({
@@ -548,7 +558,7 @@ function FileTreeItem({
           <FileCode className="w-3.5 h-3.5 text-slate-400 ml-4 shrink-0" />
         )}
         <span className="truncate">{node.name}</span>
-        {node.sizeFormatted && <span className="text-[10px] text-slate-400 ml-auto shrink-0">{node.sizeFormatted}</span>}
+        {node.sizeBytes > 0 && <span className="text-[10px] text-slate-400 ml-auto shrink-0">{formatBytes(node.sizeBytes)}</span>}
       </div>
 
       {isDir && open && node.children && (
@@ -589,6 +599,10 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [selectedFileNode, setSelectedFileNode] = useState<any | null>(null);
+  const [selectedFileContent, setSelectedFileContent] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [copiedFile, setCopiedFile] = useState(false);
 
   // ChatGPT State
   const [chatMessages, setChatMessages] = useState<
@@ -628,6 +642,41 @@ export function App() {
     }
   };
 
+  const handleSelectFile = async (node: any) => {
+    setSelectedFileNode(node);
+    setCopiedFile(false);
+    if (!node || node.type === 'DIRECTORY') {
+      setSelectedFileContent(null);
+      setFileError(null);
+      return;
+    }
+
+    if (!analysis) return;
+    setFileLoading(true);
+    setFileError(null);
+    setSelectedFileContent(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/repositories/${analysis.repositoryId}/file?path=${encodeURIComponent(node.path)}`);
+      if (!res.ok) {
+        throw new Error(`Failed to load file content (${res.status})`);
+      }
+      const data = await res.json();
+      setSelectedFileContent(data.content ?? '');
+    } catch (err: any) {
+      setFileError(err.message || 'Unable to read file content');
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const handleCopyFileContent = () => {
+    if (!selectedFileContent) return;
+    navigator.clipboard.writeText(selectedFileContent);
+    setCopiedFile(true);
+    setTimeout(() => setCopiedFile(false), 2000);
+  };
+
   const handleAnalyze = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!repoUrl.trim()) return;
@@ -645,8 +694,26 @@ export function App() {
         throw new Error(data.message || 'Failed to analyze repository');
       }
       setAnalysis(data);
+
+      // Auto-select first source file in explorer
+      const findFirstFile = (nodes: any[]): any => {
+        for (const n of nodes) {
+          if (n.type === 'FILE') return n;
+          if (n.children && n.children.length > 0) {
+            const found = findFirstFile(n.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
       if (data.fileTree && data.fileTree.length > 0) {
-        setSelectedFileNode(data.fileTree[0]);
+        const first = findFirstFile(data.fileTree);
+        if (first) {
+          handleSelectFile(first);
+        } else {
+          setSelectedFileNode(data.fileTree[0]);
+        }
       }
       // Always open in ChatGPT (Gitly AI) interface
       setActiveTab('chat');
@@ -1266,7 +1333,7 @@ export function App() {
                                           return null;
                                         };
                                         const target = findNode(analysis?.fileTree || []);
-                                        if (target) setSelectedFileNode(target);
+                                        if (target) handleSelectFile(target);
                                       }}
                                       className={`text-[10px] font-mono px-2 py-0.5 rounded-md transition ${
                                         isDark
@@ -1455,20 +1522,26 @@ export function App() {
               <div className="flex-1 p-6 overflow-hidden">
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100vh-140px)] max-w-6xl mx-auto">
                   {/* File Tree Left Pane */}
-                  <div className={`md:col-span-5 p-4 rounded-2xl border overflow-y-auto ${
+                  <div className={`md:col-span-5 p-4 rounded-2xl border flex flex-col overflow-hidden ${
                     isDark ? 'bg-[#2a2a2a] border-white/10' : 'bg-white border-slate-200 shadow-sm'
                   }`}>
-                    <div className={`text-xs font-semibold mb-3 uppercase tracking-wider font-mono ${
-                      isDark ? 'text-slate-400' : 'text-slate-500'
-                    }`}>
-                      File Tree ({analysis.totalFiles} files)
+                    <div className="flex items-center justify-between mb-3 shrink-0">
+                      <div className={`text-xs font-semibold uppercase tracking-wider font-mono ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}>
+                        File Tree ({analysis.totalFiles} files)
+                      </div>
+                      <span className="text-[10px] font-mono text-emerald-500 font-semibold px-2 py-0.5 rounded bg-emerald-500/10">
+                        {analysis.branch || 'main'}
+                      </span>
                     </div>
-                    <div className="space-y-0.5">
+
+                    <div className="flex-1 overflow-y-auto space-y-0.5 pr-1">
                       {(analysis.fileTree || []).map((node: any, idx: number) => (
                         <FileTreeItem
                           key={idx}
                           node={node}
-                          onSelect={setSelectedFileNode}
+                          onSelect={handleSelectFile}
                           selectedPath={selectedFileNode?.path}
                           isDark={isDark}
                         />
@@ -1477,31 +1550,116 @@ export function App() {
                   </div>
 
                   {/* Code Viewer Right Pane */}
-                  <div className={`md:col-span-7 p-5 rounded-2xl border flex flex-col ${
+                  <div className={`md:col-span-7 p-5 rounded-2xl border flex flex-col overflow-hidden ${
                     isDark ? 'bg-[#2a2a2a] border-white/10' : 'bg-white border-slate-200 shadow-sm'
                   }`}>
                     {selectedFileNode ? (
                       <>
-                        <div className={`flex items-center justify-between pb-3 mb-3 border-b ${
+                        <div className={`flex items-center justify-between pb-3 mb-3 border-b shrink-0 ${
                           isDark ? 'border-white/10' : 'border-slate-200'
                         }`}>
-                          <div className="flex items-center space-x-2">
-                            <FileCode className="w-4 h-4 text-emerald-500" />
-                            <span className={`font-mono text-xs font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                          <div className="flex items-center space-x-2 truncate mr-2">
+                            {selectedFileNode.type === 'DIRECTORY' ? (
+                              <Folder className="w-4 h-4 text-amber-400 shrink-0" />
+                            ) : (
+                              <FileCode className="w-4 h-4 text-emerald-500 shrink-0" />
+                            )}
+                            <span className={`font-mono text-xs font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
                               {selectedFileNode.path}
                             </span>
                           </div>
-                          <span className="text-[11px] font-mono text-slate-400">{selectedFileNode.sizeFormatted}</span>
+
+                          <div className="flex items-center space-x-2 shrink-0">
+                            {selectedFileNode.language && (
+                              <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${
+                                isDark ? 'bg-white/10 text-slate-300' : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {selectedFileNode.language}
+                              </span>
+                            )}
+                            {selectedFileNode.sizeBytes > 0 && (
+                              <span className="text-[10px] font-mono text-slate-400">
+                                {formatBytes(selectedFileNode.sizeBytes)}
+                              </span>
+                            )}
+                            {selectedFileNode.type === 'FILE' && (
+                              <button
+                                onClick={() => {
+                                  setActiveTab('chat');
+                                  askQuestion(`Explain the functions, architectural role, and implementation logic of ${selectedFileNode.path}`);
+                                }}
+                                className={`px-2.5 py-1 rounded text-[11px] font-mono flex items-center space-x-1.5 border transition font-medium ${
+                                  isDark
+                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                                    : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                }`}
+                                title={`Ask Gitly AI to explain ${selectedFileNode.path}`}
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                                <span>Ask AI</span>
+                              </button>
+                            )}
+                            {selectedFileContent !== null && (
+                              <button
+                                onClick={handleCopyFileContent}
+                                className={`px-2 py-1 rounded text-[11px] font-mono flex items-center space-x-1 border transition ${
+                                  isDark ? 'border-white/10 hover:bg-white/10 text-slate-300' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
+                                }`}
+                                title="Copy file content"
+                              >
+                                {copiedFile ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span className="text-emerald-400 font-medium">Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className={`flex-1 overflow-auto p-4 rounded-xl font-mono text-xs ${
-                          isDark ? 'bg-[#181818] text-slate-200' : 'bg-slate-900 text-slate-100'
-                        }`}>
-                          {selectedFileNode.content ? (
-                            <pre className="whitespace-pre">{selectedFileNode.content}</pre>
-                          ) : (
-                            <div className="text-slate-500 italic">Select a file to inspect its source.</div>
-                          )}
-                        </div>
+
+                        {/* File Body Content */}
+                        {fileLoading ? (
+                          <div className="flex-1 flex flex-col items-center justify-center space-y-2 text-xs font-mono text-slate-400">
+                            <RefreshCw className="w-5 h-5 animate-spin text-emerald-500" />
+                            <span>Loading file content from repository...</span>
+                          </div>
+                        ) : fileError ? (
+                          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3 font-mono">
+                            <AlertCircle className="w-6 h-6 text-rose-400" />
+                            <div className="text-xs text-rose-400">{fileError}</div>
+                            <button
+                              onClick={() => handleSelectFile(selectedFileNode)}
+                              className="text-xs text-emerald-500 hover:underline flex items-center space-x-1"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>Retry loading</span>
+                            </button>
+                          </div>
+                        ) : selectedFileNode.type === 'DIRECTORY' ? (
+                          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-2 font-mono text-slate-400">
+                            <Folder className="w-10 h-10 text-amber-400 opacity-60" />
+                            <div className="text-xs font-medium text-slate-300">{selectedFileNode.name}</div>
+                            <div className="text-[11px] text-slate-500">
+                              Directory contains {selectedFileNode.children?.length || 0} items. Select any file from the tree to view its source code.
+                            </div>
+                          </div>
+                        ) : selectedFileContent !== null ? (
+                          <div className={`flex-1 overflow-auto p-4 rounded-xl font-mono text-xs leading-relaxed ${
+                            isDark ? 'bg-[#181818] text-slate-200 selection:bg-emerald-500/30' : 'bg-slate-900 text-slate-100 selection:bg-emerald-500/40'
+                          }`}>
+                            <pre className="whitespace-pre">{selectedFileContent}</pre>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center text-xs text-slate-500 font-mono">
+                            Select a file from the tree to inspect its source code.
+                          </div>
+                        )}
                       </>
                     ) : (
                       <div className="flex-1 flex items-center justify-center text-xs text-slate-500 font-mono">
