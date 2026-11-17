@@ -71,6 +71,14 @@ public class RepositoryController {
         return ResponseEntity.ok(understandingService.getAnalysis(repositoryId).getFileTree());
     }
 
+    @GetMapping("/{repositoryId}/file")
+    @Operation(summary = "Get raw source code and metadata of a specific file in the repository")
+    public ResponseEntity<Map<String, Object>> getFile(
+            @PathVariable String repositoryId,
+            @RequestParam String path) {
+        return ResponseEntity.ok(understandingService.getFileContent(repositoryId, path));
+    }
+
     @GetMapping("/{repositoryId}/overview")
     @Operation(summary = "Get plain-English project overview and language distribution")
     public ResponseEntity<RepositoryAnalysisResult.ProjectOverview> getOverview(@PathVariable String repositoryId) {
