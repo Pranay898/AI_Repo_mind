@@ -319,7 +319,7 @@ public class RepositoryUnderstandingService {
         Map<ComponentItem, Integer> scores = new LinkedHashMap<>();
 
         boolean asksAuth = qLower.matches(".*(auth|login|register|password|otp|user|role|permission|security|session).*");
-        boolean asksDb = qLower.matches(".*(db|database|data|store|storage|collection|table|schema|model|firestore|firebase|sql|mongo|entity).*");
+        boolean asksDb = qLower.matches(".*(db|database|data|store|storage|collection|table|schema|model|sql|mongo|postgres|mysql|redis|entity).*");
         boolean asksUi = qLower.matches(".*(ui|page|dashboard|view|screen|frontend|component|button|style|css|layout|navbar|modal).*");
         boolean asksApiOrFunc = qLower.matches(".*(api|endpoint|route|function|method|def|handler|controller|call).*");
         boolean asksAiOrGen = qLower.matches(".*(ai|gemini|llm|prompt|question|generate|langchain|model|quiz|bank|curriculum).*");
@@ -789,7 +789,7 @@ public class RepositoryUnderstandingService {
             List<String> imports = extractImports(content, lang);
             List<String> discoveredFunctions = new ArrayList<>();
 
-            // 1. PYTHON DEEP ANALYSIS (Streamlit, FastAPI, Flask, Django, LangChain, Firebase, Data Science)
+            // 1. PYTHON DEEP ANALYSIS (Streamlit, FastAPI, Flask, Django, LangChain, Data Science)
             if (lang.equals("Python")) {
                 // Extract Python functions: def func_name(args):
                 Matcher defMatcher = Pattern.compile("(?m)^def\\s+([a-zA-Z0-9_]+)\\s*\\(([^)]*)\\)\\s*:").matcher(content);
@@ -831,18 +831,11 @@ public class RepositoryUnderstandingService {
                             .build());
                 }
 
-                // Extract Firestore collections: db.collection("...") or firestore.collection("...")
-                Matcher firestoreMatcher = Pattern.compile("(?:db|firestore)\\.collection\\s*\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)").matcher(content);
-                while (firestoreMatcher.find()) {
-                    databaseModels.add(firestoreMatcher.group(1) + " (Firestore Collection)");
-                    dataAccessFiles.add(relPath);
-                }
-
-                // Extract SQL tables or SQLAlchemy models
+                // Extract SQL tables, collections, or ORM models
                 Matcher sqlTable = Pattern.compile("(?i)__tablename__\\s*=\\s*['\"]([^'\"]+)['\"]|CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?([a-zA-Z0-9_]+)").matcher(content);
                 while (sqlTable.find()) {
                     String tbl = sqlTable.group(1) != null ? sqlTable.group(1) : sqlTable.group(2);
-                    databaseModels.add(tbl + " (SQL Table)");
+                    databaseModels.add(tbl + " (Model/Table)");
                     dataAccessFiles.add(relPath);
                 }
 
@@ -852,7 +845,7 @@ public class RepositoryUnderstandingService {
                     category = "Entry & Routing Layer";
                 } else if (lowerName.contains("dashboard") || lowerName.contains("view") || lowerName.contains("ui") || lowerName.contains("page")) {
                     category = "UI View / Dashboard";
-                } else if (lowerName.contains("db") || lowerName.contains("database") || lowerName.contains("model") || lowerName.contains("schema") || content.contains("firestore.client()")) {
+                } else if (lowerName.contains("db") || lowerName.contains("database") || lowerName.contains("model") || lowerName.contains("schema") || lowerName.contains("repository") || lowerName.contains("dao")) {
                     category = "Database & Persistence";
                     dataAccessFiles.add(relPath);
                 } else if (lowerName.contains("auth") || lowerName.contains("login") || lowerName.contains("security")) {
@@ -1192,7 +1185,9 @@ public class RepositoryUnderstandingService {
         if (lower.equals("streamlit")) { frameworks.add("Streamlit"); return "Interactive Python Web UI & Dashboard framework"; }
         if (lower.contains("langchain_google_genai") || lower.contains("google-generativeai")) { frameworks.add("Google Gemini AI"); return "Google Gemini LLM integration"; }
         if (lower.contains("langchain")) { frameworks.add("LangChain"); return "AI Agent & LLM orchestration framework"; }
-        if (lower.equals("firebase-admin") || lower.equals("firebase_admin") || lower.equals("firebase")) { frameworks.add("Firebase Firestore"); return "Firebase Admin SDK & Firestore NoSQL client"; }
+        if (lower.equals("sqlalchemy")) { frameworks.add("SQLAlchemy"); return "Python SQL toolkit & ORM"; }
+        if (lower.equals("psycopg2") || lower.equals("asyncpg")) { return "PostgreSQL database driver"; }
+        if (lower.equals("pymongo")) { frameworks.add("MongoDB"); return "MongoDB Python client"; }
         if (lower.equals("fastapi")) { frameworks.add("FastAPI"); return "High-performance async Python REST framework"; }
         if (lower.equals("flask")) { frameworks.add("Flask"); return "Lightweight Python web application framework"; }
         if (lower.equals("django")) { frameworks.add("Django"); return "Full-stack Python web framework"; }
@@ -1223,7 +1218,6 @@ public class RepositoryUnderstandingService {
         for (String content : fileContentsMap.values()) {
             if (content.contains("import streamlit")) frameworks.add("Streamlit");
             if (content.contains("langchain_google_genai") || content.contains("GoogleGenerativeAI")) frameworks.add("Google Gemini AI");
-            if (content.contains("import firebase_admin") || content.contains("from firebase_admin") || content.contains("require('firebase-admin')")) frameworks.add("Firebase Firestore");
             if (content.contains("@SpringBootApplication")) frameworks.add("Spring Boot");
         }
     }
@@ -1469,7 +1463,7 @@ public class RepositoryUnderstandingService {
             }
         }
 
-        // 2. Strict, realistic local fallback (no false positives, no loose 'firebase' strings)
+        // 2. Strict, realistic local fallback
         return buildLocalDatabaseInfo(fullName, frameworks, deps, models, dataAccessFiles, components);
     }
 
@@ -1511,8 +1505,8 @@ public class RepositoryUnderstandingService {
         }
 
         sb.append("INSTRUCTIONS:\n");
-        sb.append("1. Determine the EXACT database technology used. If NO database is used (e.g. CLI tool, frontend-only, stateless web app), specify 'Stateless / In-Memory State / External APIs'. NEVER claim Firebase, SQL, or MongoDB unless an actual database library, config, or connection is in this codebase.\n");
-        sb.append("2. Write a clear, factual 2-3 sentence 'dataFlowSummary' explaining how data is handled or persisted.\n");
+        sb.append("1. Inspect the codebase and dependencies to determine the exact database or persistence technology used. If NO database or persistence layer is configured (e.g. CLI tool, frontend-only, or in-memory application), specify 'Stateless / In-Memory State'. Only report a database if the code or dependencies genuinely connect to or configure one.\n");
+        sb.append("2. Write a factual, concise 2-3 sentence 'dataFlowSummary' explaining how data and state are managed.\n");
         sb.append("3. Provide 'detectedModels': array of real domain models, entities, or collections found in the code (empty array [] if none).\n");
         sb.append("4. Provide 'mermaidErDiagram': valid Mermaid syntax (starting with 'erDiagram' or 'flowchart LR') illustrating the data persistence or flow.\n\n");
         sb.append("OUTPUT REQUIREMENT: Respond ONLY with valid JSON (no markdown fences, no extra commentary):\n");
@@ -1582,24 +1576,22 @@ public class RepositoryUnderstandingService {
         String dbTech = "Stateless / In-Memory State";
         for (DependencyItem d : deps) {
             String n = d.getName().toLowerCase();
-            if (n.equals("firebase-admin") || n.equals("@angular/fire") || n.contains("firebase-admin")) {
-                dbTech = "Firebase Firestore"; break;
-            } else if (n.equals("pg") || n.equals("postgresql") || n.contains("postgresql") || n.contains("r2dbc-postgresql")) {
+            if (n.equals("pg") || n.equals("postgresql") || n.contains("postgresql") || n.contains("r2dbc-postgresql")) {
                 dbTech = "PostgreSQL Relational DB"; break;
             } else if (n.equals("mysql") || n.equals("mysql2") || n.contains("mysql-connector")) {
                 dbTech = "MySQL Relational DB"; break;
-            } else if (n.equals("h2") || n.contains("com.h2database")) {
-                dbTech = "H2 In-Memory Relational DB"; break;
-            } else if (n.contains("spring-boot-starter-data-jpa") || n.equals("hibernate-core")) {
-                dbTech = "Spring Data JPA / Relational DB"; break;
-            } else if (n.equals("mongodb") || n.equals("mongoose") || n.contains("spring-boot-starter-data-mongodb")) {
+            } else if (n.equals("mongodb") || n.equals("mongoose") || n.contains("spring-boot-starter-data-mongodb") || n.equals("pymongo")) {
                 dbTech = "MongoDB NoSQL Database"; break;
-            } else if (n.equals("prisma") || n.equals("@prisma/client")) {
-                dbTech = "Prisma ORM Database"; break;
-            } else if (n.equals("redis") || n.equals("ioredis") || n.contains("spring-boot-starter-data-redis")) {
-                dbTech = "Redis Key-Value Cache"; break;
             } else if (n.equals("sqlite3") || n.equals("better-sqlite3") || n.contains("sqlite")) {
                 dbTech = "SQLite Embedded Database"; break;
+            } else if (n.equals("redis") || n.equals("ioredis") || n.contains("spring-boot-starter-data-redis")) {
+                dbTech = "Redis Key-Value Cache"; break;
+            } else if (n.equals("h2") || n.contains("com.h2database")) {
+                dbTech = "H2 In-Memory Relational DB"; break;
+            } else if (n.contains("spring-boot-starter-data-jpa") || n.equals("hibernate-core") || n.equals("sqlalchemy")) {
+                dbTech = "Relational ORM Database"; break;
+            } else if (n.equals("prisma") || n.equals("@prisma/client")) {
+                dbTech = "Prisma ORM Database"; break;
             }
         }
 
