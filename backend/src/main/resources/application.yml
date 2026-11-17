@@ -4,6 +4,23 @@ server:
 spring:
   application:
     name: gitly-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/gitly}
+    username: ${SPRING_DATASOURCE_USERNAME:gitly}
+    password: ${SPRING_DATASOURCE_PASSWORD:gitlypassword}
+    driver-class-name: org.postgresql.Driver
+  jackson:
+    time-zone: Asia/Kolkata
+  jpa:
+    hibernate:
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          time_zone: Asia/Kolkata
 
 gitly:
   gemini:
@@ -11,6 +28,7 @@ gitly:
     model: ${GEMINI_MODEL:gemini-3.5-flash}
   storage:
     clone-dir: ${CLONE_DIR:${java.io.tmpdir}/gitly-repos}
+    cache-retention-hours: ${CACHE_RETENTION_HOURS:48}
 
 repomind:
   gemini:
@@ -24,4 +42,3 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
-

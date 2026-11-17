@@ -46,6 +46,40 @@ mermaid.initialize({
 const API_BASE = (((import.meta as any).env?.VITE_API_BASE_URL as string) || '').replace(/\/+$/, '');
 
 /**
+ * Returns or initializes a persistent anonymous session token for user chat isolation.
+ */
+function getSessionToken(): string {
+  let token = localStorage.getItem('gitly_session_token');
+  if (!token) {
+    token = 'usr_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now();
+    localStorage.setItem('gitly_session_token', token);
+  }
+  return token;
+}
+
+/**
+ * Formats any ISO/UTC date or timestamp to Indian Standard Time (IST, UTC+5:30).
+ */
+function formatToIST(dateInput?: string | Date | null): string {
+  if (!dateInput) {
+    return new Date().toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }) + ' IST';
+  }
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  }) + ' IST';
+}
+
+/**
  * Strips all HTML tags and unescapes entities safely.
  */
 function stripHtml(text: string): string {
@@ -606,10 +640,11 @@ export function App() {
 
   // ChatGPT State
   const [chatMessages, setChatMessages] = useState<
-    Array<{ role: 'user' | 'assistant'; text: string; thoughts?: string[]; files?: string[]; engine?: string }>
+    Array<{ role: 'user' | 'assistant'; text: string; thoughts?: string[]; files?: string[]; engine?: string; createdAt?: string }>
   >([]);
   const [chatQuestion, setChatQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [cacheClearing, setCacheClearing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Check backend health & Gemini status on load
@@ -634,7 +669,9 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: apiKeyInput.trim() })
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = {};
+      try { data = rawText ? JSON.parse(rawText) : {}; } catch {}
       setGeminiActive(Boolean(data.geminiConfigured));
       setShowKeyInput(false);
     } catch (err) {
@@ -658,10 +695,13 @@ export function App() {
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/repositories/${analysis.repositoryId}/file?path=${encodeURIComponent(node.path)}`);
+      const rawText = await res.text();
+      let data: any = {};
+      try { data = rawText ? JSON.parse(rawText) : {}; } catch {}
+
       if (!res.ok) {
-        throw new Error(`Failed to load file content (${res.status})`);
+        throw new Error(data.message || `Failed to load file content (${res.status})`);
       }
-      const data = await res.json();
       setSelectedFileContent(data.content ?? '');
     } catch (err: any) {
       setFileError(err.message || 'Unable to read file content');
@@ -686,12 +726,28 @@ export function App() {
     try {
       const res = await fetch(`${API_BASE}/api/v1/repositories/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': getSessionToken()
+        },
         body: JSON.stringify({ repositoryUrl: repoUrl.trim(), branch: branch.trim() || undefined })
       });
-      const data = await res.json();
+      
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = { message: rawText };
+      }
+
       if (!res.ok) {
-        throw new Error(data.message || 'Failed to analyze repository');
+        throw new Error(
+          data.message ||
+          (res.status === 500
+            ? 'Backend service is unreachable on port 8080. Please ensure the Gitly backend is running.'
+            : `Failed to analyze repository (Status ${res.status})`)
+        );
       }
       setAnalysis(data);
 
@@ -717,22 +773,50 @@ export function App() {
       }
       // Always open in ChatGPT (Gitly AI) interface
       setActiveTab('chat');
-      // Initialize first welcome message
-      setChatMessages([
-        {
-          role: 'assistant',
-          thoughts: data.agentThinkingSteps || [
-            `Scanned ${data.totalFiles} files across ${data.totalDirectories} directories`,
-            `Identified primary language: ${Object.keys(data.languageDistribution || {})[0] || 'Unknown'}`,
-            `Mapped architecture into interactive visual topology`
-          ],
-          text: `👋 Welcome! I am **Gitly AI**, your codebase intelligence copilot for **${data.repositoryName}**.\n\n`
-            + `- **Language Stack:** ${Object.keys(data.languageDistribution || {}).join(', ') || 'Multi-language'}\n`
-            + `- **Frameworks:** ${(data.detectedFrameworks || []).join(', ') || 'Standard'}\n`
-            + `- **Persistence:** ${data.databaseInfo?.databaseTechnology || 'Application State'}\n\n`
-            + `Ask me anything about this repository, request interactive architecture diagrams, or pick a deep-dive topic to explore:`
+
+      // Try to load any existing persisted chat history for this user & repo
+      let loadedHistory = false;
+      try {
+        const histRes = await fetch(`${API_BASE}/api/v1/repositories/${data.repositoryId}/chat-history`, {
+          headers: { 'X-Session-Token': getSessionToken() }
+        });
+        if (histRes.ok) {
+          const histData = await histRes.json();
+          if (Array.isArray(histData) && histData.length > 0) {
+            setChatMessages(histData.map((m: any) => ({
+              role: m.role,
+              text: m.text,
+              thoughts: m.agentThoughts,
+              files: m.referencedFiles,
+              engine: m.engine,
+              createdAt: m.createdAt
+            })));
+            loadedHistory = true;
+          }
         }
-      ]);
+      } catch (e) {
+        console.warn('Could not load chat history:', e);
+      }
+
+      if (!loadedHistory) {
+        // Initialize first welcome message
+        setChatMessages([
+          {
+            role: 'assistant',
+            createdAt: new Date().toISOString(),
+            thoughts: data.agentThinkingSteps || [
+              `Scanned ${data.totalFiles} files across ${data.totalDirectories} directories`,
+              `Identified primary language: ${Object.keys(data.languageDistribution || {})[0] || 'Unknown'}`,
+              `Mapped architecture into interactive visual topology`
+            ],
+            text: `👋 Welcome! I am **Gitly AI**, your codebase intelligence copilot for **${data.repositoryName}**.\n\n`
+              + `- **Language Stack:** ${Object.keys(data.languageDistribution || {}).join(', ') || 'Multi-language'}\n`
+              + `- **Frameworks:** ${(data.detectedFrameworks || []).join(', ') || 'Standard'}\n`
+              + `- **Persistence:** ${data.databaseInfo?.databaseTechnology || 'Application State'}\n\n`
+              + `Ask me anything about this repository, request interactive architecture diagrams, or pick a deep-dive topic to explore:`
+          }
+        ]);
+      }
     } catch (err: any) {
       setError(err.message || 'Could not analyze repository');
     } finally {
@@ -744,7 +828,8 @@ export function App() {
     if (!questionText.trim() || !analysis) return;
 
     const userMsg = questionText.trim();
-    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    const userTime = new Date().toISOString();
+    setChatMessages(prev => [...prev, { role: 'user', text: userMsg, createdAt: userTime }]);
     setChatQuestion('');
     setChatLoading(true);
 
@@ -753,14 +838,20 @@ export function App() {
 
       const res = await fetch(`${API_BASE}/api/v1/repositories/${analysis.repositoryId}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': getSessionToken()
+        },
         body: JSON.stringify({
           question: userMsg,
           history: history.slice(-6),
           apiKey: apiKeyInput.trim() || undefined
         })
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = {};
+      try { data = rawText ? JSON.parse(rawText) : {}; } catch { data = { message: rawText }; }
+
       if (res.ok) {
         setChatMessages(prev => [
           ...prev,
@@ -769,19 +860,49 @@ export function App() {
             text: data.answer,
             thoughts: data.agentThoughts,
             files: data.referencedFiles,
-            engine: data.engine
+            engine: data.engine,
+            createdAt: new Date().toISOString()
           }
         ]);
       } else {
         setChatMessages(prev => [
           ...prev,
-          { role: 'assistant', text: 'Error: ' + (data.message || 'Failed to get answer from AI service.') }
+          { role: 'assistant', text: 'Error: ' + (data.message || `Server error (${res.status}). Verify backend is running.`) }
         ]);
       }
     } catch (err: any) {
-      setChatMessages(prev => [...prev, { role: 'assistant', text: 'Network connection failed. Please verify backend is running.' }]);
+      setChatMessages(prev => [...prev, { role: 'assistant', text: 'Network connection failed. Please verify backend is running on port 8080.' }]);
     } finally {
       setChatLoading(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (!analysis) return;
+    const confirmClear = window.confirm(
+      `Clear cached clone and database analysis for ${analysis.repositoryName}? This will purge local files and force a fresh analysis.`
+    );
+    if (!confirmClear) return;
+
+    setCacheClearing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/repositories/${analysis.repositoryId}/cache`, {
+        method: 'DELETE'
+      });
+      const rawText = await res.text();
+      let data: any = {};
+      try { data = rawText ? JSON.parse(rawText) : {}; } catch { data = { message: rawText }; }
+
+      if (res.ok) {
+        alert('Repository cache cleared successfully! Re-analyzing repository now...');
+        handleAnalyze();
+      } else {
+        alert('Failed to clear cache: ' + (data.message || `Server error (${res.status})`));
+      }
+    } catch (err: any) {
+      alert('Error clearing cache: ' + err.message);
+    } finally {
+      setCacheClearing(false);
     }
   };
 
@@ -907,6 +1028,11 @@ export function App() {
               }`}>
                 {analysis.branch || 'main'}
               </span>
+              {analysis.analyzedAt && (
+                <span className="text-[10px] font-mono text-slate-400 hidden lg:inline">
+                  • {formatToIST(analysis.analyzedAt)}
+                </span>
+              )}
               <button
                 onClick={handleSwitchRepo}
                 className={`text-[11px] font-mono underline ml-1 transition ${
@@ -914,6 +1040,19 @@ export function App() {
                 }`}
               >
                 Switch
+              </button>
+              <button
+                onClick={handleClearCache}
+                disabled={cacheClearing}
+                className={`text-[11px] font-mono transition flex items-center space-x-1 px-1.5 py-0.5 rounded border ml-1 ${
+                  isDark
+                    ? 'border-white/10 hover:border-red-500/40 text-slate-400 hover:text-red-400 hover:bg-red-500/10'
+                    : 'border-slate-200 hover:border-red-300 text-slate-500 hover:text-red-600 hover:bg-red-50'
+                }`}
+                title="Clear local clone & database cache to force fresh re-analysis"
+              >
+                <RefreshCw className={`w-3 h-3 ${cacheClearing ? 'animate-spin' : ''}`} />
+                <span>Clear Cache</span>
               </button>
             </div>
           )}
@@ -1347,12 +1486,18 @@ export function App() {
                                 </div>
                               )}
 
-                              {/* Engine Footer */}
-                              {m.role === 'assistant' && (
-                                <div className="mt-2 text-[10px] font-mono text-slate-500 flex items-center space-x-1.5">
-                                  <span>{m.engine || (geminiActive ? 'Gemini 3.5 Flash' : 'Gitly AI Reasoning Engine')}</span>
-                                </div>
-                              )}
+                              {/* Message Footer: Engine & IST Timestamp */}
+                              <div className={`mt-2 text-[10px] font-mono flex items-center space-x-2 ${
+                                isDark ? 'text-slate-500' : 'text-slate-400'
+                              } ${m.role === 'user' ? 'justify-end text-slate-400' : 'justify-start'}`}>
+                                {m.role === 'assistant' && (
+                                  <>
+                                    <span>{m.engine || (geminiActive ? 'Gemini 3.5 Flash' : 'Gitly AI Reasoning Engine')}</span>
+                                    <span>•</span>
+                                  </>
+                                )}
+                                <span>{formatToIST(m.createdAt)}</span>
+                              </div>
                             </div>
                           </div>
                         ))

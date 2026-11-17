@@ -49,8 +49,10 @@ public class RepositoryController {
 
     @PostMapping("/analyze")
     @Operation(summary = "Clone and analyze any public GitHub repository across all languages")
-    public ResponseEntity<RepositoryAnalysisResult> analyzeRepository(@Valid @RequestBody AnalyzeRepoRequest request) {
-        return ResponseEntity.ok(understandingService.analyzeRepository(request.getRepositoryUrl(), request.getBranch()));
+    public ResponseEntity<RepositoryAnalysisResult> analyzeRepository(
+            @RequestHeader(value = "X-Session-Token", required = false) String sessionToken,
+            @Valid @RequestBody AnalyzeRepoRequest request) {
+        return ResponseEntity.ok(understandingService.analyzeRepository(request.getRepositoryUrl(), request.getBranch(), sessionToken));
     }
 
     @GetMapping
@@ -125,7 +127,26 @@ public class RepositoryController {
     @Operation(summary = "Ask Gemini AI or Codebase Reasoning Agent questions about the repository with file context")
     public ResponseEntity<Map<String, Object>> chat(
             @PathVariable String repositoryId,
+            @RequestHeader(value = "X-Session-Token", required = false) String sessionToken,
             @Valid @RequestBody ChatRequest request) {
-        return ResponseEntity.ok(understandingService.answerChatQuestion(repositoryId, request));
+        return ResponseEntity.ok(understandingService.answerChatQuestion(repositoryId, request, sessionToken));
+    }
+
+    @GetMapping("/{repositoryId}/chat-history")
+    @Operation(summary = "Get persisted chat history for the repository and session")
+    public ResponseEntity<List<Map<String, Object>>> getChatHistory(
+            @PathVariable String repositoryId,
+            @RequestHeader(value = "X-Session-Token", required = false) String sessionToken) {
+        return ResponseEntity.ok(understandingService.getChatHistory(repositoryId, sessionToken));
+    }
+
+    @DeleteMapping("/{repositoryId}/cache")
+    @Operation(summary = "Clear cached repository files and analysis records to force fresh clone")
+    public ResponseEntity<Map<String, Object>> clearCache(@PathVariable String repositoryId) {
+        understandingService.clearCache(repositoryId);
+        return ResponseEntity.ok(Map.of(
+                "status", "SUCCESS",
+                "message", "Repository cache cleared successfully. Next request will perform a fresh clone."
+        ));
     }
 }

@@ -5,6 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.repomind.dto.ChatRequest;
 import com.repomind.dto.RepositoryAnalysisResult;
 import com.repomind.dto.RepositoryAnalysisResult.*;
+import com.repomind.entity.AnalysisRecordEntity;
+import com.repomind.entity.ChatMessageEntity;
+import com.repomind.entity.ChatSessionEntity;
+import com.repomind.entity.RepositoryEntity;
+import com.repomind.repository.AnalysisRecordRepository;
+import com.repomind.repository.ChatMessageRepository;
+import com.repomind.repository.ChatSessionRepository;
+import com.repomind.repository.RepositoryEntityRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,7 +35,12 @@ public class RepositoryUnderstandingService {
 
     private final GitHubRepositoryService gitHubService;
     private final GeminiAIService geminiService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+    private final RepositoryEntityRepository repoEntityRepository;
+    private final AnalysisRecordRepository analysisRecordRepository;
+    private final ChatSessionRepository chatSessionRepository;
+    private final ChatMessageRepository chatMessageRepository;
+    private final CachePruningService cachePruningService;
 
     private final Map<String, RepositoryAnalysisResult> analysisStore = new ConcurrentHashMap<>();
     private final Map<String, Path> repoPathStore = new ConcurrentHashMap<>();
@@ -49,6 +62,10 @@ public class RepositoryUnderstandingService {
     );
 
     public RepositoryAnalysisResult analyzeRepository(String repositoryUrl, String branch) {
+        return analyzeRepository(repositoryUrl, branch, "default");
+    }
+
+    public RepositoryAnalysisResult analyzeRepository(String repositoryUrl, String branch, String sessionToken) {
         String fullName = gitHubService.extractRepoFullName(repositoryUrl);
         String repoId = UUID.nameUUIDFromBytes(fullName.toLowerCase().getBytes()).toString();
 
@@ -138,19 +155,174 @@ public class RepositoryUnderstandingService {
                 .build();
 
         analysisStore.put(repoId, result);
+
+        // Persist to PostgreSQL database for historical tracking & cache
+        try {
+            RepositoryEntity repoEntity = repoEntityRepository.findById(repoId)
+                    .orElse(RepositoryEntity.builder()
+                            .id(repoId)
+                            .createdAt(Instant.now())
+                            .build());
+            repoEntity.setFullName(fullName);
+            repoEntity.setRepositoryUrl("https://github.com/" + fullName);
+            repoEntity.setDefaultBranch(branch != null && !branch.isBlank() ? branch : "default");
+            repoEntity.setTotalFiles(counts[0]);
+            repoEntity.setTotalDirectories(counts[1]);
+            repoEntity.setPrimaryLanguage(primaryLanguage);
+            repoEntity.setLocalClonePath(rootPath.toString());
+            repoEntity.setLastAccessedAt(Instant.now());
+            repoEntityRepository.save(repoEntity);
+
+            AnalysisRecordEntity record = AnalysisRecordEntity.builder()
+                    .repository(repoEntity)
+                    .branch(branch != null && !branch.isBlank() ? branch : "default")
+                    .overviewJson(objectMapper.writeValueAsString(overview))
+                    .architectureJson(objectMapper.writeValueAsString(architecture))
+                    .databaseInfoJson(objectMapper.writeValueAsString(dbInfo))
+                    .fileTreeJson(objectMapper.writeValueAsString(tree))
+                    .componentsJson(objectMapper.writeValueAsString(components))
+                    .apisJson(objectMapper.writeValueAsString(apis))
+                    .dependenciesJson(objectMapper.writeValueAsString(dependencies))
+                    .frameworksJson(objectMapper.writeValueAsString(frameworks))
+                    .languageDistributionJson(objectMapper.writeValueAsString(langCounts))
+                    .thinkingStepsJson(objectMapper.writeValueAsString(agentSteps))
+                    .createdAt(Instant.now())
+                    .build();
+            analysisRecordRepository.saveAndFlush(record);
+
+            // Initialize or update primary chat session immediately so chat_sessions is always populated
+            try {
+                String token = (sessionToken != null && !sessionToken.isBlank()) ? sessionToken : "default";
+                ChatSessionEntity initialSession = chatSessionRepository
+                        .findFirstByRepositoryIdAndSessionTokenOrderByLastActiveAtDesc(repoId, token)
+                        .orElseGet(() -> ChatSessionEntity.builder()
+                                .repositoryId(repoId)
+                                .sessionToken(token)
+                                .title("Analysis: " + fullName)
+                                .createdAt(Instant.now())
+                                .lastActiveAt(Instant.now())
+                                .build());
+                initialSession.setLastActiveAt(Instant.now());
+                chatSessionRepository.saveAndFlush(initialSession);
+
+                if (chatMessageRepository.findBySession_IdOrderByCreatedAtAsc(initialSession.getId()).isEmpty()) {
+                    ChatMessageEntity welcomeMsg = ChatMessageEntity.builder()
+                            .session(initialSession)
+                            .role("assistant")
+                            .messageText("Welcome to Gitly AI for " + fullName + "! Ask me anything about this repository, request interactive architecture diagrams, or explore data models.")
+                            .thoughtsJson(objectMapper.writeValueAsString(agentSteps))
+                            .engine("Gitly AI Initializer")
+                            .createdAt(Instant.now())
+                            .build();
+                    chatMessageRepository.saveAndFlush(welcomeMsg);
+                }
+                log.info("Initialized chat session {} for repository {}", initialSession.getId(), fullName);
+            } catch (Exception e) {
+                log.warn("Failed to initialize chat session in DB: {}", e.getMessage());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to persist repository analysis to database for {}: {}", repoId, e.getMessage());
+        }
+
         return result;
     }
 
     public RepositoryAnalysisResult getAnalysis(String repoId) {
         RepositoryAnalysisResult res = analysisStore.get(repoId);
-        if (res == null) {
-            throw new IllegalArgumentException("Repository analysis not found for ID: " + repoId);
+        if (res != null) {
+            return res;
         }
-        return res;
+
+        // Try restoring from PostgreSQL
+        try {
+            var optRecord = analysisRecordRepository.findFirstByRepository_IdOrderByCreatedAtDesc(repoId);
+            if (optRecord.isPresent()) {
+                AnalysisRecordEntity rec = optRecord.get();
+                RepositoryEntity repo = rec.getRepository();
+
+                ProjectOverview overview = rec.getOverviewJson() != null
+                        ? objectMapper.readValue(rec.getOverviewJson(), ProjectOverview.class) : null;
+                ArchitectureData architecture = rec.getArchitectureJson() != null
+                        ? objectMapper.readValue(rec.getArchitectureJson(), ArchitectureData.class) : null;
+                DatabaseInfo dbInfo = rec.getDatabaseInfoJson() != null
+                        ? objectMapper.readValue(rec.getDatabaseInfoJson(), DatabaseInfo.class) : null;
+                List<FileNode> fileTree = rec.getFileTreeJson() != null
+                        ? objectMapper.readValue(rec.getFileTreeJson(), objectMapper.getTypeFactory().constructCollectionType(List.class, FileNode.class)) : Collections.emptyList();
+                List<ComponentItem> components = rec.getComponentsJson() != null
+                        ? objectMapper.readValue(rec.getComponentsJson(), objectMapper.getTypeFactory().constructCollectionType(List.class, ComponentItem.class)) : Collections.emptyList();
+                List<ApiEndpointItem> apis = rec.getApisJson() != null
+                        ? objectMapper.readValue(rec.getApisJson(), objectMapper.getTypeFactory().constructCollectionType(List.class, ApiEndpointItem.class)) : Collections.emptyList();
+                List<DependencyItem> dependencies = rec.getDependenciesJson() != null
+                        ? objectMapper.readValue(rec.getDependenciesJson(), objectMapper.getTypeFactory().constructCollectionType(List.class, DependencyItem.class)) : Collections.emptyList();
+                List<String> frameworks = rec.getFrameworksJson() != null
+                        ? objectMapper.readValue(rec.getFrameworksJson(), objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)) : Collections.emptyList();
+                Map<String, Integer> langCounts = rec.getLanguageDistributionJson() != null
+                        ? objectMapper.readValue(rec.getLanguageDistributionJson(), objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Integer.class)) : Collections.emptyMap();
+                List<String> thinkingSteps = rec.getThinkingStepsJson() != null
+                        ? objectMapper.readValue(rec.getThinkingStepsJson(), objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)) : Collections.emptyList();
+
+                RepositoryAnalysisResult restored = RepositoryAnalysisResult.builder()
+                        .repositoryId(repo.getId())
+                        .repositoryName(repo.getFullName())
+                        .repositoryUrl(repo.getRepositoryUrl())
+                        .branch(rec.getBranch())
+                        .status("COMPLETED")
+                        .analyzedAt(rec.getCreatedAt())
+                        .totalFiles(repo.getTotalFiles())
+                        .totalDirectories(repo.getTotalDirectories())
+                        .overview(overview)
+                        .languageDistribution(langCounts)
+                        .detectedFrameworks(frameworks)
+                        .dependencies(dependencies)
+                        .agentThinkingSteps(thinkingSteps)
+                        .fileTree(fileTree)
+                        .architecture(architecture)
+                        .components(components)
+                        .apis(apis)
+                        .databaseInfo(dbInfo)
+                        .workflows(Collections.emptyList())
+                        .build();
+
+                analysisStore.put(repoId, restored);
+                if (repo.getLocalClonePath() != null && Files.exists(Path.of(repo.getLocalClonePath()))) {
+                    repoPathStore.put(repoId, Path.of(repo.getLocalClonePath()));
+                }
+                return restored;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to restore repository analysis from database for {}: {}", repoId, e.getMessage());
+        }
+
+        throw new IllegalArgumentException("Repository analysis not found for ID: " + repoId);
     }
 
     public List<RepositoryAnalysisResult> listAllAnalyzed() {
-        return new ArrayList<>(analysisStore.values());
+        if (!analysisStore.isEmpty()) {
+            return new ArrayList<>(analysisStore.values());
+        }
+        try {
+            return repoEntityRepository.findAll().stream()
+                    .map(r -> {
+                        try {
+                            return getAnalysis(r.getId());
+                        } catch (Exception e) {
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .toList();
+        } catch (Exception e) {
+            return new ArrayList<>(analysisStore.values());
+        }
+    }
+
+    public void clearCache(String repoId) {
+        Path memPath = repoPathStore.remove(repoId);
+        analysisStore.remove(repoId);
+        repoFileContentsStore.remove(repoId);
+
+        cachePruningService.clearRepositoryCache(repoId, memPath);
+        log.info("Cleared cache and pruned records for repository: {}", repoId);
     }
 
     public Map<String, Object> getFileContent(String repoId, String relPath) {
@@ -207,10 +379,15 @@ public class RepositoryUnderstandingService {
     }
 
     public Map<String, Object> answerChatQuestion(String repoId, String question) {
-        return answerChatQuestion(repoId, ChatRequest.builder().question(question).build());
+        return answerChatQuestion(repoId, ChatRequest.builder().question(question).build(), null);
     }
 
     public Map<String, Object> answerChatQuestion(String repoId, ChatRequest request) {
+        return answerChatQuestion(repoId, request, null);
+    }
+
+    public Map<String, Object> answerChatQuestion(String repoId, ChatRequest request, String sessionToken) {
+        long startTime = System.currentTimeMillis();
         RepositoryAnalysisResult repo = getAnalysis(repoId);
         Path rootPath = repoPathStore.get(repoId);
         Map<String, String> fileContents = repoFileContentsStore.getOrDefault(repoId, Map.of());
@@ -300,6 +477,51 @@ public class RepositoryUnderstandingService {
             aiAnswer = buildDynamicAgentAnswer(repo, rootPath, fileContents, qClean, qLower, queryTokens, rankedComponents, matchedFiles);
         }
 
+        int latencyMs = (int) (System.currentTimeMillis() - startTime);
+
+        // Persist prompt and response to PostgreSQL database
+        try {
+            String token = (sessionToken != null && !sessionToken.isBlank()) ? sessionToken : "anonymous";
+            ChatSessionEntity session = chatSessionRepository
+                    .findFirstByRepositoryIdAndSessionTokenOrderByLastActiveAtDesc(repoId, token)
+                    .orElseGet(() -> {
+                        ChatSessionEntity newSession = ChatSessionEntity.builder()
+                                .repositoryId(repoId)
+                                .sessionToken(token)
+                                .title(qClean.length() > 60 ? qClean.substring(0, 57) + "..." : qClean)
+                                .createdAt(Instant.now())
+                                .lastActiveAt(Instant.now())
+                                .build();
+                        return chatSessionRepository.saveAndFlush(newSession);
+                    });
+
+            session.setLastActiveAt(Instant.now());
+            chatSessionRepository.saveAndFlush(session);
+
+            ChatMessageEntity userMsg = ChatMessageEntity.builder()
+                    .session(session)
+                    .role("user")
+                    .messageText(qClean)
+                    .createdAt(Instant.now())
+                    .build();
+            chatMessageRepository.saveAndFlush(userMsg);
+
+            ChatMessageEntity assistantMsg = ChatMessageEntity.builder()
+                    .session(session)
+                    .role("assistant")
+                    .messageText(aiAnswer)
+                    .thoughtsJson(objectMapper.writeValueAsString(agentThoughts))
+                    .referencedFilesJson(objectMapper.writeValueAsString(matchedFiles))
+                    .engine(engineModel)
+                    .latencyMs(latencyMs)
+                    .createdAt(Instant.now())
+                    .build();
+            chatMessageRepository.saveAndFlush(assistantMsg);
+            log.info("Persisted user & assistant chat messages into session {} (token: {})", session.getId(), token);
+        } catch (Exception e) {
+            log.warn("Failed to persist chat message to database: {}", e.getMessage(), e);
+        }
+
         return Map.of(
                 "repositoryId", repoId,
                 "question", qClean,
@@ -308,6 +530,35 @@ public class RepositoryUnderstandingService {
                 "referencedFiles", matchedFiles,
                 "engine", engineModel
         );
+    }
+
+    public List<Map<String, Object>> getChatHistory(String repoId, String sessionToken) {
+        String token = (sessionToken != null && !sessionToken.isBlank()) ? sessionToken : "anonymous";
+        return chatSessionRepository
+                .findFirstByRepositoryIdAndSessionTokenOrderByLastActiveAtDesc(repoId, token)
+                .map(session -> chatMessageRepository.findBySession_IdOrderByCreatedAtAsc(session.getId()).stream()
+                        .map(msg -> {
+                            Map<String, Object> map = new LinkedHashMap<>();
+                            map.put("id", msg.getId());
+                            map.put("role", msg.getRole());
+                            map.put("text", msg.getMessageText());
+                            map.put("engine", msg.getEngine());
+                            map.put("createdAt", msg.getCreatedAt().toString());
+                            if (msg.getLatencyMs() != null) {
+                                map.put("latencyMs", msg.getLatencyMs());
+                            }
+                            try {
+                                if (msg.getThoughtsJson() != null) {
+                                    map.put("agentThoughts", objectMapper.readValue(msg.getThoughtsJson(), List.class));
+                                }
+                                if (msg.getReferencedFilesJson() != null) {
+                                    map.put("referencedFiles", objectMapper.readValue(msg.getReferencedFilesJson(), List.class));
+                                }
+                            } catch (Exception ignored) {}
+                            return map;
+                        })
+                        .toList())
+                .orElse(Collections.emptyList());
     }
 
     private List<ComponentItem> rankComponentsForQuestion(
